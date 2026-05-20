@@ -1,0 +1,1200 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mi-mi+ レンタル空き確認</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    :root {
+      --pink: #f4a8bd;
+      --pink-soft: #fbe4ec;
+      --pink-deep: #d97a96;
+      --cream: #fdf8f4;
+      --ink: #524547;
+      --gray: #b6a8aa;
+      --gray-light: #ece2e3;
+      --ok: #5fa776;
+      --ng: #c66a6a;
+      --shadow: 0 2px 12px rgba(217, 122, 150, 0.08);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      font-family: -apple-system, "Hiragino Sans", "Yu Gothic UI", system-ui, sans-serif;
+      color: var(--ink);
+      background: var(--cream);
+      line-height: 1.6;
+      font-size: 15px;
+    }
+    .wrap { max-width: 560px; margin: 0 auto; padding: 24px 16px 80px; }
+    header { text-align: center; margin-bottom: 20px; }
+    header h1 {
+      font-size: 20px; font-weight: 600;
+      margin: 0 0 4px; letter-spacing: 0.04em;
+    }
+    header p { margin: 0; font-size: 12px; color: var(--gray); }
+    .steps { display: flex; justify-content: center; gap: 8px; margin: 12px 0 24px; }
+    .step-dot {
+      width: 28px; height: 4px; border-radius: 2px;
+      background: var(--gray-light);
+    }
+    .step-dot.active { background: var(--pink); }
+    .card {
+      background: #fff; border-radius: 16px;
+      padding: 22px 18px; box-shadow: var(--shadow);
+      margin-bottom: 16px;
+    }
+    h2 {
+      font-size: 16px; font-weight: 600; margin: 0 0 16px;
+      padding-bottom: 10px; border-bottom: 1px solid var(--gray-light);
+    }
+    label { display: block; margin: 14px 0 6px; font-size: 13px; font-weight: 500; }
+    label.req::after { content: " *"; color: var(--pink-deep); }
+    input[type=text], input[type=date], input[type=tel], input[type=email],
+    select, textarea {
+      width: 100%; padding: 10px 12px;
+      border: 1px solid var(--gray-light); border-radius: 10px;
+      font-size: 15px; font-family: inherit; color: var(--ink);
+      background: #fff;
+    }
+    textarea { min-height: 80px; resize: vertical; }
+    input:focus, select:focus, textarea:focus {
+      outline: none; border-color: var(--pink);
+    }
+    .help { font-size: 12px; color: var(--gray); margin-top: 4px; }
+    .btn {
+      display: block; width: 100%; padding: 14px;
+      border-radius: 999px; border: none; font-size: 15px; font-weight: 600;
+      cursor: pointer; transition: opacity .15s;
+      font-family: inherit;
+    }
+    .btn-primary { background: var(--pink); color: #fff; }
+    .btn-primary:disabled { background: var(--gray-light); color: var(--gray); cursor: not-allowed; }
+    .btn-ghost { background: #fff; color: var(--ink); border: 1px solid var(--gray-light); }
+    .btn-line { background: #06c755; color: #fff; }
+    .btn-row { display: flex; gap: 8px; margin-top: 14px; }
+    .btn-row .btn { flex: 1; }
+
+    /* 衣装カード (画像付き + インラインカレンダー) */
+    .garment-list { display: flex; flex-direction: column; gap: 12px; margin: 12px 0; }
+    .garment-card {
+      border: 1px solid var(--gray-light);
+      border-radius: 14px;
+      background: #fff;
+      overflow: hidden;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .garment-card.has-date { border-color: var(--pink); box-shadow: 0 0 0 1px var(--pink); }
+    .garment-card.open { border-color: var(--pink); }
+    .garment-card .head {
+      display: flex; gap: 12px; padding: 10px 12px;
+      align-items: center; cursor: pointer;
+    }
+    .garment-card .thumb {
+      width: 72px; height: 72px; border-radius: 10px;
+      background: var(--gray-light) center/cover no-repeat;
+      flex-shrink: 0;
+      position: relative;
+    }
+    .garment-card .thumb.no-img::after {
+      content: "👗"; position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 28px; opacity: 0.5;
+    }
+    .garment-card .info { flex: 1; min-width: 0; }
+    .garment-card .name { font-weight: 600; font-size: 14px; }
+    .garment-card .meta { font-size: 11px; color: var(--gray); margin-top: 2px; }
+    .garment-card .selected-date {
+      font-size: 12px; color: var(--pink-deep); font-weight: 600; margin-top: 4px;
+      background: var(--pink-soft); border-radius: 6px; padding: 2px 6px;
+      display: inline-block;
+    }
+    .garment-card .indicator {
+      font-size: 18px; color: var(--gray);
+      transition: transform .2s;
+      flex-shrink: 0;
+    }
+    .garment-card.open .indicator { transform: rotate(180deg); color: var(--pink); }
+    .garment-card .body {
+      display: none;
+      padding: 0 12px 14px;
+    }
+    .garment-card.open .body { display: block; }
+    .garment-card .calendar-mini {
+      margin-top: 6px;
+      padding: 10px;
+      border: 1px solid var(--gray-light);
+      border-radius: 12px;
+      background: var(--cream);
+    }
+
+    /* カレンダー */
+    .calendar {
+      margin-top: 18px;
+      padding: 14px;
+      border: 1px solid var(--gray-light);
+      border-radius: 14px;
+      background: var(--cream);
+    }
+    .cal-head {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .cal-title { font-weight: 600; font-size: 15px; }
+    .cal-nav {
+      width: 32px; height: 32px; border-radius: 50%;
+      border: none; background: #fff; cursor: pointer;
+      font-size: 14px; color: var(--ink); box-shadow: var(--shadow);
+    }
+    .cal-nav:disabled { color: var(--gray-light); cursor: not-allowed; }
+    .cal-weekdays, .cal-grid {
+      display: grid; grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+    }
+    .cal-weekdays {
+      font-size: 11px; color: var(--gray); text-align: center;
+      margin-bottom: 6px;
+    }
+    .cal-weekdays .sun { color: var(--ng); }
+    .cal-weekdays .sat { color: #5d8fd6; }
+    .cal-day {
+      aspect-ratio: 1 / 1;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 8px;
+      font-size: 13px;
+      background: #fff;
+      cursor: pointer;
+      user-select: none;
+      position: relative;
+    }
+    .cal-day.outside { background: transparent; color: transparent; cursor: default; }
+    .cal-day.past { background: #f7f3f3; color: var(--gray); cursor: not-allowed; }
+    .cal-day.closed { background: #f0eaea; color: var(--gray); cursor: not-allowed; }
+    .cal-day.closed::after {
+      content: "休"; position: absolute; bottom: 2px; right: 3px;
+      font-size: 9px; color: var(--gray);
+    }
+    .cal-day.ok { background: var(--pink-soft); color: var(--pink-deep); font-weight: 600; }
+    .cal-day.ok:hover { background: var(--pink); color: #fff; }
+    .cal-day.ng { background: #f0eaea; color: var(--gray); cursor: not-allowed; }
+    .cal-day.ng::after {
+      content: "×"; position: absolute; bottom: 1px; right: 4px;
+      font-size: 10px; color: var(--ng);
+    }
+    .cal-day.selected { background: var(--pink); color: #fff; box-shadow: 0 0 0 2px var(--pink-deep); }
+    .cal-legend {
+      display: flex; gap: 12px; margin-top: 10px;
+      font-size: 11px; color: var(--gray);
+      flex-wrap: wrap;
+    }
+    .cal-legend .leg {
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .cal-legend .leg::before {
+      content: ""; display: inline-block;
+      width: 12px; height: 12px; border-radius: 3px;
+    }
+    .cal-legend .leg.ok::before { background: var(--pink-soft); }
+    .cal-legend .leg.ng::before { background: #f0eaea; }
+    .cal-legend .leg.closed::before { background: #f0eaea; }
+    .cal-loading { text-align: center; padding: 20px 0; color: var(--gray); font-size: 13px; }
+
+    .selected-box {
+      margin-top: 16px;
+      background: var(--pink-soft); border-radius: 12px;
+      padding: 12px 14px; font-size: 13px;
+    }
+    .selected-box .label { color: var(--pink-deep); font-weight: 600; margin-right: 4px; }
+    .selected-box .row { padding: 2px 0; }
+
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .checkrow {
+      display: flex; align-items: flex-start; gap: 8px;
+      margin: 12px 0; font-size: 13px;
+    }
+    .checkrow input { margin-top: 4px; }
+    .hidden { display: none !important; }
+    .err {
+      background: #fbe4e4; color: var(--ng);
+      padding: 10px 12px; border-radius: 10px;
+      font-size: 13px; margin: 10px 0;
+    }
+    .loading {
+      display: inline-block; width: 14px; height: 14px;
+      border: 2px solid #fff; border-top-color: transparent;
+      border-radius: 50%; animation: spin .8s linear infinite;
+      vertical-align: middle; margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .done { text-align: center; padding: 30px 12px; }
+    .done .big { font-size: 36px; margin-bottom: 8px; }
+    .done h2 { border: none; padding: 0; font-size: 18px; }
+    details { margin: 12px 0; }
+    details summary { font-size: 13px; cursor: pointer; color: var(--gray); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>mi-mi+ レンタル空き確認</h1>
+      <p>お衣装を選んで、空きカレンダーから受取希望日をお選びください</p>
+      <div class="steps">
+        <div class="step-dot" id="dot1"></div>
+        <div class="step-dot" id="dot2"></div>
+        <div class="step-dot" id="dot3"></div>
+      </div>
+    </header>
+
+    <!-- Step1: 衣装選択 + カレンダー -->
+    <section id="step1" class="card">
+      <h2>① お衣装と受取希望日</h2>
+
+      <label for="series">お衣装カラーで絞り込み</label>
+      <select id="series">
+        <option value="">すべて表示</option>
+      </select>
+
+      <label class="req">お衣装 <span style="font-weight: 400; color: var(--gray); font-size: 12px;">(衣装をタップして日付を選択・複数衣装＆別カラーもOK)</span></label>
+      <div id="garmentList" class="garment-list">
+        <div class="help">読み込み中...</div>
+      </div>
+
+      <details style="margin-top: 16px;">
+        <summary>レンタルプランを変更する</summary>
+        <label for="plan">レンタルプラン</label>
+        <select id="plan"></select>
+        <div class="help">プランを変更すると空き判定が再計算されます</div>
+      </details>
+
+      <div class="help" style="margin-top: 12px;">
+        ※ 予約日の前1日・後2日はお手入れ・出荷準備のためお取りできません<br>
+        ※ 月曜日は対面受取は不可、郵送のみとなります
+      </div>
+
+      <div id="bookingsSummary" class="selected-box hidden" style="margin-top: 16px;"></div>
+
+      <button class="btn btn-primary hidden" id="btnProceed" style="margin-top: 14px;">ご予約に進む</button>
+      <button class="btn btn-line" id="btnLineConsult" style="margin-top: 10px;">LINEで相談する</button>
+      <div id="err1" class="err hidden"></div>
+    </section>
+
+    <!-- Step2: 連絡先入力 -->
+    <section id="step2" class="card hidden">
+      <h2>② ご連絡先のご入力</h2>
+
+      <div id="bookingSummary" style="margin-bottom: 16px;"></div>
+
+      <label class="req" for="customerName">お名前(契約者)</label>
+      <input type="text" id="customerName" placeholder="例: 渡部 由紀">
+
+      <label class="req" for="tel">お電話番号</label>
+      <input type="tel" id="tel" placeholder="例: 09012345678">
+
+      <label class="req" for="email">メールアドレス</label>
+      <input type="email" id="email" placeholder="同意書・請求書をお送りします">
+
+      <div class="row2">
+        <div>
+          <label for="activityName">活動名</label>
+          <input type="text" id="activityName">
+        </div>
+        <div>
+          <label for="group">所属グループ/店舗</label>
+          <input type="text" id="group">
+        </div>
+      </div>
+
+      <label for="genres">活動ジャンル</label>
+      <select id="genres"></select>
+
+      <label for="useCase">使用用途</label>
+      <input type="text" id="useCase" placeholder="例: LIVE出演 / 撮影">
+
+      <label class="req" for="receiveMethod">受取方法</label>
+      <select id="receiveMethod"></select>
+
+      <div id="shippingFields">
+        <label class="req" for="prefecture">都道府県</label>
+        <select id="prefecture"></select>
+
+        <div class="row2">
+          <div>
+            <label class="req" for="postal">郵便番号</label>
+            <input type="text" id="postal" placeholder="1640001">
+          </div>
+          <div>
+            <label class="req" for="deliveryTime">お届け時間</label>
+            <select id="deliveryTime"></select>
+          </div>
+        </div>
+
+        <label class="req" for="address">ご住所</label>
+        <input type="text" id="address">
+
+        <details>
+          <summary>契約者と異なるご住所へ郵送希望の場合</summary>
+          <label for="shippingName">郵送先名義</label>
+          <input type="text" id="shippingName">
+          <label for="shippingPostal">郵送先 郵便番号</label>
+          <input type="text" id="shippingPostal">
+          <label for="shippingAddress">郵送先 ご住所</label>
+          <input type="text" id="shippingAddress">
+        </details>
+      </div>
+
+      <label class="req" for="paymentMethod">決済方法</label>
+      <select id="paymentMethod"></select>
+
+      <div class="checkrow">
+        <input type="checkbox" id="chkFood">
+        <label for="chkFood" style="margin: 0; font-weight: 400;">
+          飲食利用 (+¥6,000) を含む<br>
+          <span style="font-size: 11px; color: var(--ng);">※コンセプトカフェ等での着用の場合は必須でチェックしてください</span>
+        </label>
+      </div>
+
+      <label for="note">備考・ご要望</label>
+      <textarea id="note" placeholder="ご質問やご要望がございましたらご記入ください"></textarea>
+
+      <div class="checkrow">
+        <input type="checkbox" id="chkAgree">
+        <label for="chkAgree" style="margin: 0; font-weight: 400;">
+          事前に掲載されている【mi-mi+ 衣装レンタル 利用規定】に同意いたします。
+        </label>
+      </div>
+      <div class="checkrow" id="shipFeeRow">
+        <input type="checkbox" id="chkShipFee">
+        <label for="chkShipFee" style="margin: 0; font-weight: 400;">
+          送料が発生することを確認しました。<br>
+          <span style="font-size: 11px; color: var(--ng); line-height: 1.5;">
+            ※ 提携郵送会社(ヤマト運輸)で発送いたします。遅延等が発生した場合は弊社にて責任を負いかねます<br>
+            ※ 返送代はお客様にてご負担をお願いいたします。着払いで返送された場合は受付できません
+          </span>
+        </label>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-ghost" id="btnBack2">戻る</button>
+        <button class="btn btn-primary" id="btnSubmit">予約を申し込む</button>
+      </div>
+      <div id="err2" class="err hidden"></div>
+    </section>
+
+    <!-- Step3: 完了 -->
+    <section id="step3" class="card hidden done">
+      <div class="big">🎀</div>
+      <h2>ご予約申込を承りました</h2>
+      <p style="font-size: 13px; color: var(--gray); margin: 12px 0 16px;">
+        同意書と請求書を 1〜2日以内に<br>
+        メールにてお送りいたします。
+      </p>
+
+      <div style="background: var(--pink-soft); border-radius: 12px; padding: 14px; margin: 16px 0; text-align: left;">
+        <div style="font-weight: 600; color: var(--pink-deep); font-size: 13px; margin-bottom: 6px;">
+          📩 LINEに自動送信されなかった方へ
+        </div>
+        <div style="font-size: 11px; color: var(--ink); margin-bottom: 10px; line-height: 1.5;">
+          下のテキストをコピーして mi-mi+ 公式LINEに<br>
+          送信してください (確認ができ次第ご返信いたします)
+        </div>
+        <textarea id="summaryCopy" readonly style="width: 100%; height: 200px; font-size: 11px; padding: 8px; border: 1px solid var(--gray-light); border-radius: 8px; background: #fff; resize: vertical; font-family: inherit;"></textarea>
+        <button class="btn btn-primary" id="btnCopySummary" style="margin-top: 8px; padding: 10px; font-size: 13px;">
+          📋 サマリをコピー
+        </button>
+        <div id="copyDone" class="hidden" style="font-size: 12px; color: var(--ok); margin-top: 6px; text-align: center;">
+          ✓ コピーしました!LINEに貼り付けて送信してください
+        </div>
+      </div>
+
+      <a class="btn btn-line" id="btnLineDone">LINEに戻る</a>
+    </section>
+  </div>
+
+<script>
+// ===== Apps Script API endpoint (Vercel側はここを叩いてNotion登録/Push通知してもらう) =====
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxC7JXpttF6S9mIsQ8WhdkjxSYvOJ7XBW2k1ftip4KbcobcjBPC8yIsm3yyq0sElbSewg/exec';
+
+async function apiCall(action, payload) {
+  const res = await fetch(APPS_SCRIPT_URL, {
+    method: 'POST',
+    body: JSON.stringify({ action: action, payload: payload || {} }),
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' }  // simple request にしてpreflight回避
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  if (data && data.error) throw new Error(data.error);
+  return data;
+}
+
+let CONFIG = null;
+let GARMENTS = [];
+let BOOKINGS = [];            // [{ garment, startDate, calendar?, viewMonth?, shootDate?, eventDate?, shootCalendar?, eventCalendar?, shootViewMonth?, eventViewMonth? }] — 通常プランは startDate/calendar、撮影&イベントプランは shoot/event 系を使用
+let OPEN_GARMENT_ID = null;   // 現在開いてる衣装ID (排他展開)
+const SHOOT_EVENT_PLAN_PREFIX = '撮影&イベントプラン';
+function isShootEventPlan_(plan) {
+  return !!plan && plan.indexOf(SHOOT_EVENT_PLAN_PREFIX) === 0;
+}
+let LINE_USER_ID = '';        // LIFF経由で取得
+let LINE_DISPLAY_NAME = '';   // 同上
+let IS_IN_LINE = false;       // LINE内ブラウザで開かれているか
+let LAST_PAYLOAD = null;      // 送信成功時 liff.sendMessages 用
+const MAX_FUTURE_DAYS = 60;
+
+const $ = id => document.getElementById(id);
+
+function setStep(n) {
+  ['step1','step2','step3'].forEach((id, i) => {
+    $(id).classList.toggle('hidden', i + 1 !== n);
+  });
+  ['dot1','dot2','dot3'].forEach((id, i) => {
+    $(id).classList.toggle('active', i + 1 <= n);
+  });
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function showError(elId, msg) {
+  const el = $(elId);
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+function hideError(elId) { $(elId).classList.add('hidden'); }
+
+function init() {
+  apiCall('getFormConfig')
+    .then(onConfig)
+    .catch(e => showError('err1', '初期化エラー: ' + e.message));
+
+  apiCall('getGarments')
+    .then(onGarments)
+    .catch(e => showError('err1', '衣装データ取得エラー: ' + e.message));
+
+  $('plan').addEventListener('change', () => {
+    // プラン変更ですべての衣装の選択をリセット (通常↔撮影&イベントで日付意味が変わるため)
+    BOOKINGS.forEach(b => {
+      b.calendar = null; b.startDate = null; b.viewMonth = null;
+      b.shootCalendar = null; b.shootDate = null; b.shootViewMonth = null;
+      b.eventCalendar = null; b.eventDate = null; b.eventViewMonth = null;
+    });
+    if (OPEN_GARMENT_ID) {
+      const b = BOOKINGS.find(x => x.garment.id === OPEN_GARMENT_ID);
+      if (b) {
+        const card = document.querySelector(`.garment-card[data-id="${OPEN_GARMENT_ID}"]`);
+        if (card) loadGarmentCalendar(b.garment, card.querySelector('.body'));
+      }
+    }
+    renderGarments();
+    renderBookingsSummary();
+  });
+  $('btnLineConsult').addEventListener('click', closeOrGoLine);
+  $('btnLineDone').addEventListener('click', closeOrGoLine);
+  $('btnCopySummary').addEventListener('click', copySummary_);
+  $('btnProceed').addEventListener('click', () => {
+    const plan = $('plan').value;
+    const valid = BOOKINGS.filter(b => bookingHasDates_(b, plan));
+    if (!valid.length) return;
+    renderBookingSummary();
+    setStep(2);
+  });
+  $('btnBack2').addEventListener('click', () => setStep(1));
+  $('btnSubmit').addEventListener('click', onSubmit);
+  $('receiveMethod').addEventListener('change', toggleShippingFields);
+
+  setStep(1);
+}
+
+function onConfig(cfg) {
+  CONFIG = cfg;
+  fillSelect($('plan'), cfg.plans, cfg.defaultPlan);
+  fillSelect($('genres'), cfg.genres);
+  fillSelect($('receiveMethod'), cfg.receiveMethods);
+  fillSelect($('paymentMethod'), cfg.paymentMethods);
+  fillSelect($('deliveryTime'), cfg.deliveryTimes, '時間指定なし');
+  fillSelect($('prefecture'), cfg.prefectures, '東京都');
+  $('genres').insertAdjacentHTML('afterbegin', '<option value="">選択してください</option>');
+  $('genres').value = '';
+  toggleShippingFields();
+  initLiff();
+}
+
+function initLiff() {
+  if (!CONFIG || !CONFIG.liffId) return;
+  if (typeof liff === 'undefined') {
+    console.warn('LIFF SDK が読み込まれていません');
+    return;
+  }
+  liff.init({ liffId: CONFIG.liffId })
+    .then(() => {
+      IS_IN_LINE = liff.isInClient();
+      if (liff.isLoggedIn()) {
+        return liff.getProfile().then(p => {
+          LINE_USER_ID = p.userId || '';
+          LINE_DISPLAY_NAME = p.displayName || '';
+          applyLineProfile();
+        });
+      } else if (IS_IN_LINE) {
+        liff.login();
+      }
+    })
+    .catch(err => {
+      console.warn('LIFF init failed:', err);
+    });
+}
+
+function applyLineProfile() {
+  if (!LINE_DISPLAY_NAME) return;
+  const nameInput = $('customerName');
+  if (nameInput && !nameInput.value) {
+    nameInput.placeholder = `LINE登録名: ${LINE_DISPLAY_NAME}`;
+  }
+  // ヘッダーに LINE 連携済みバッジを軽く表示
+  const header = document.querySelector('header p');
+  if (header && IS_IN_LINE) {
+    header.textContent = `LINE: ${LINE_DISPLAY_NAME} 様としてご利用中`;
+  }
+}
+
+function closeOrGoLine() {
+  if (typeof liff !== 'undefined' && IS_IN_LINE && liff.closeWindow) {
+    liff.closeWindow();
+  } else if (CONFIG && CONFIG.lineUrl) {
+    location.href = CONFIG.lineUrl;
+  }
+}
+
+function fillSelect(sel, options, def) {
+  sel.innerHTML = '';
+  options.forEach(o => {
+    const opt = document.createElement('option');
+    opt.value = o; opt.textContent = o;
+    sel.appendChild(opt);
+  });
+  if (def && options.indexOf(def) >= 0) sel.value = def;
+}
+
+function onGarments(items) {
+  GARMENTS = items || [];
+  const colorsList = [...new Set(GARMENTS.flatMap(g => g.colors || []).filter(Boolean))];
+  const colorSel = $('series');
+  colorSel.innerHTML = '<option value="">すべて表示</option>';
+  colorsList.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c; opt.textContent = c;
+    colorSel.appendChild(opt);
+  });
+  colorSel.addEventListener('change', renderGarments);
+  renderGarments();
+}
+
+function renderGarments() {
+  const color = $('series').value;
+  const list = $('garmentList');
+  list.innerHTML = '';
+
+  const items = color
+    ? GARMENTS.filter(g => (g.colors || []).includes(color))
+    : GARMENTS;
+  if (!items.length) {
+    list.innerHTML = '<div class="help">該当する衣装がありません</div>';
+    return;
+  }
+  items.forEach(g => {
+    const card = createGarmentCard(g);
+    list.appendChild(card);
+  });
+}
+
+function createGarmentCard(g) {
+  const booking = BOOKINGS.find(x => x.garment.id === g.id);
+  const card = document.createElement('div');
+  card.className = 'garment-card';
+  const plan = $('plan').value;
+  const isSet = isShootEventPlan_(plan);
+  const hasDate = booking && (isSet ? (booking.shootDate && booking.eventDate) : booking.startDate);
+  if (hasDate) card.classList.add('has-date');
+  if (OPEN_GARMENT_ID === g.id) card.classList.add('open');
+  card.dataset.id = g.id;
+
+  const colors = (g.colors || []).join(' / ');
+  const thumbClass = g.coverUrl ? '' : ' no-img';
+  const thumbStyle = g.coverUrl ? `background-image: url('${escapeHtml(g.coverUrl)}');` : '';
+
+  let dateLine = '';
+  if (booking) {
+    if (isSet) {
+      const shoot = booking.shootDate
+        ? `撮影: ${fmtYmd_(booking.shootDate)}〜${fmtEnd_(booking.shootDate, plan, 'shoot')}`
+        : '撮影: 未選択';
+      const event = booking.eventDate
+        ? `イベント: ${fmtYmd_(booking.eventDate)}〜${fmtEnd_(booking.eventDate, plan, 'event')}`
+        : 'イベント: 未選択';
+      dateLine = `<div class="selected-date">📅 ${shoot} / ${event}</div>`;
+    } else if (booking.startDate) {
+      dateLine = `<div class="selected-date">📅 ${fmtYmd_(booking.startDate)} 〜 ${fmtEnd_(booking.startDate, plan)}</div>`;
+    }
+  }
+
+  card.innerHTML = `
+    <div class="head">
+      <div class="thumb${thumbClass}" style="${thumbStyle}"></div>
+      <div class="info">
+        <div class="name">${escapeHtml(g.name)}</div>
+        <div class="meta">${escapeHtml(g.series || '')}${colors ? ' ・ ' + escapeHtml(colors) : ''}</div>
+        ${dateLine}
+      </div>
+      <div class="indicator">▾</div>
+    </div>
+    <div class="body"></div>
+  `;
+  card.querySelector('.head').addEventListener('click', () => onGarmentCardClick(g, card));
+  // 既に開いてる衣装ならカレンダーを描画
+  if (OPEN_GARMENT_ID === g.id) {
+    loadGarmentCalendar(g, card.querySelector('.body'));
+  }
+  return card;
+}
+
+function onGarmentCardClick(g, card) {
+  if (OPEN_GARMENT_ID === g.id) {
+    // 折りたたみ
+    OPEN_GARMENT_ID = null;
+    card.classList.remove('open');
+    card.querySelector('.body').innerHTML = '';
+    return;
+  }
+  // 他の開いてるカードを閉じる
+  if (OPEN_GARMENT_ID) {
+    const prev = document.querySelector(`.garment-card[data-id="${OPEN_GARMENT_ID}"]`);
+    if (prev) {
+      prev.classList.remove('open');
+      prev.querySelector('.body').innerHTML = '';
+    }
+  }
+  OPEN_GARMENT_ID = g.id;
+  card.classList.add('open');
+  loadGarmentCalendar(g, card.querySelector('.body'));
+}
+
+function loadGarmentCalendar(g, body) {
+  const plan = $('plan').value;
+  const isSet = isShootEventPlan_(plan);
+  let booking = BOOKINGS.find(x => x.garment.id === g.id);
+  if (!booking) {
+    booking = { garment: g };
+    BOOKINGS.push(booking);
+  }
+  body.innerHTML = '';
+  if (isSet) {
+    // 撮影&イベントプラン: 2セクション
+    body.appendChild(buildCalSectionContainer_('shoot', '📅 撮影日 (1泊2日)'));
+    body.appendChild(buildCalSectionContainer_('event', '📅 イベント日 (2泊3日)'));
+    loadCalendarSection_(booking, body.querySelector('[data-kind="shoot"] .calendar-mini'), 'shoot', 1);
+    loadCalendarSection_(booking, body.querySelector('[data-kind="event"] .calendar-mini'), 'event', 2);
+  } else {
+    // 通常プラン: 1セクション
+    body.appendChild(buildCalSectionContainer_(null, null));
+    loadCalendarSection_(booking, body.querySelector('.calendar-mini'), null, null);
+  }
+}
+
+function buildCalSectionContainer_(kind, label) {
+  const wrap = document.createElement('div');
+  if (kind) {
+    wrap.setAttribute('data-kind', kind);
+    wrap.style.marginTop = (kind === 'event') ? '14px' : '0';
+    const h = document.createElement('div');
+    h.textContent = label;
+    h.style.cssText = 'font-weight: 600; color: var(--pink-deep); margin: 8px 0 4px; font-size: 13px;';
+    wrap.appendChild(h);
+  }
+  const mini = document.createElement('div');
+  mini.className = 'calendar-mini';
+  mini.innerHTML = `
+    <div class="cal-head">
+      <button class="cal-nav" data-cal-prev>‹</button>
+      <div class="cal-title">読み込み中…</div>
+      <button class="cal-nav" data-cal-next>›</button>
+    </div>
+    <div class="cal-weekdays">
+      <span class="sun">日</span><span>月</span><span>火</span><span>水</span>
+      <span>木</span><span>金</span><span class="sat">土</span>
+    </div>
+    <div class="cal-grid" data-cal-grid></div>
+    <div class="cal-legend">
+      <span class="leg ok">空き</span>
+      <span class="leg ng">予約済</span>
+    </div>
+  `;
+  wrap.appendChild(mini);
+  return wrap;
+}
+
+function loadCalendarSection_(booking, sectionElem, kind, planDaysOverride) {
+  const fromStr = formatDateLocal(new Date());
+  apiCall('getAvailabilityCalendar', {
+      garmentId: booking.garment.id,
+      fromDate: fromStr,
+      days: MAX_FUTURE_DAYS,
+      plan: $('plan').value,
+      planDaysOverride: planDaysOverride,
+    })
+    .then(d => {
+      if (kind === 'shoot') booking.shootCalendar = d;
+      else if (kind === 'event') booking.eventCalendar = d;
+      else booking.calendar = d;
+      const firstAvail = d.dayStatus.find(s => s.available);
+      const init = firstAvail ? new Date(firstAvail.date + 'T00:00:00') : new Date();
+      const vm = new Date(init.getFullYear(), init.getMonth(), 1);
+      if (kind === 'shoot') booking.shootViewMonth = vm;
+      else if (kind === 'event') booking.eventViewMonth = vm;
+      else booking.viewMonth = vm;
+      renderCalendarSection_(booking, sectionElem, kind);
+    })
+    .catch(e => {
+      sectionElem.querySelector('.cal-title').textContent = 'カレンダー取得エラー';
+      console.warn(e);
+    });
+  sectionElem.querySelector('[data-cal-prev]').addEventListener('click', e => {
+    e.stopPropagation();
+    const vm = (kind === 'shoot') ? booking.shootViewMonth : (kind === 'event') ? booking.eventViewMonth : booking.viewMonth;
+    if (!vm) return;
+    const newVm = new Date(vm.getFullYear(), vm.getMonth() - 1, 1);
+    if (kind === 'shoot') booking.shootViewMonth = newVm;
+    else if (kind === 'event') booking.eventViewMonth = newVm;
+    else booking.viewMonth = newVm;
+    renderCalendarSection_(booking, sectionElem, kind);
+  });
+  sectionElem.querySelector('[data-cal-next]').addEventListener('click', e => {
+    e.stopPropagation();
+    const vm = (kind === 'shoot') ? booking.shootViewMonth : (kind === 'event') ? booking.eventViewMonth : booking.viewMonth;
+    if (!vm) return;
+    const newVm = new Date(vm.getFullYear(), vm.getMonth() + 1, 1);
+    if (kind === 'shoot') booking.shootViewMonth = newVm;
+    else if (kind === 'event') booking.eventViewMonth = newVm;
+    else booking.viewMonth = newVm;
+    renderCalendarSection_(booking, sectionElem, kind);
+  });
+}
+
+function renderCalendarSection_(booking, sectionElem, kind) {
+  const cal = (kind === 'shoot') ? booking.shootCalendar : (kind === 'event') ? booking.eventCalendar : booking.calendar;
+  const vm = (kind === 'shoot') ? booking.shootViewMonth : (kind === 'event') ? booking.eventViewMonth : booking.viewMonth;
+  const selectedDate = (kind === 'shoot') ? booking.shootDate : (kind === 'event') ? booking.eventDate : booking.startDate;
+  if (!cal || !vm) return;
+  const year = vm.getFullYear();
+  const month = vm.getMonth();
+  sectionElem.querySelector('.cal-title').textContent = `${year}年${month + 1}月`;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const maxDate = new Date(today); maxDate.setDate(maxDate.getDate() + MAX_FUTURE_DAYS - 1);
+  const prevDisabled = year < today.getFullYear() || (year === today.getFullYear() && month <= today.getMonth());
+  const nextDisabled = year > maxDate.getFullYear() || (year === maxDate.getFullYear() && month >= maxDate.getMonth());
+  sectionElem.querySelector('[data-cal-prev]').disabled = prevDisabled;
+  sectionElem.querySelector('[data-cal-next]').disabled = nextDisabled;
+  const statusByDate = {};
+  cal.dayStatus.forEach(s => { statusByDate[s.date] = s.available; });
+  const firstDay = new Date(year, month, 1);
+  const startWeekday = firstDay.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const grid = sectionElem.querySelector('[data-cal-grid]');
+  grid.innerHTML = '';
+  for (let i = 0; i < startWeekday; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'cal-day outside';
+    grid.appendChild(cell);
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = new Date(year, month, d);
+    const ymd = formatDateLocal(date);
+    const cell = document.createElement('div');
+    cell.className = 'cal-day';
+    cell.textContent = d;
+    if (date < today || date > maxDate) {
+      cell.classList.add('past');
+    } else if (statusByDate[ymd] === true) {
+      cell.classList.add('ok');
+      cell.addEventListener('click', e => {
+        e.stopPropagation();
+        selectDateForGarment(booking.garment, ymd, kind);
+      });
+    } else if (statusByDate[ymd] === false) {
+      cell.classList.add('ng');
+    } else {
+      cell.classList.add('past');
+    }
+    if (selectedDate === ymd) cell.classList.add('selected');
+    grid.appendChild(cell);
+  }
+}
+// 後方互換 (既存呼び出しがあれば)
+function renderGarmentCalendar(booking, body) {
+  renderCalendarSection_(booking, body, null);
+}
+
+function selectDateForGarment(g, ymd, kind) {
+  let booking = BOOKINGS.find(x => x.garment.id === g.id);
+  if (!booking) {
+    booking = { garment: g };
+    BOOKINGS.push(booking);
+  }
+  if (kind === 'shoot') booking.shootDate = ymd;
+  else if (kind === 'event') booking.eventDate = ymd;
+  else booking.startDate = ymd;
+  // 同じカード内の他カレンダーを再描画 (選択日表示更新のみ)
+  const card = document.querySelector(`.garment-card[data-id="${g.id}"]`);
+  if (card) {
+    const shootSection = card.querySelector('[data-kind="shoot"] .calendar-mini');
+    const eventSection = card.querySelector('[data-kind="event"] .calendar-mini');
+    if (shootSection) renderCalendarSection_(booking, shootSection, 'shoot');
+    if (eventSection) renderCalendarSection_(booking, eventSection, 'event');
+  }
+  renderGarments();
+  renderBookingsSummary();
+}
+
+function removeBooking(garmentId) {
+  const idx = BOOKINGS.findIndex(b => b.garment.id === garmentId);
+  if (idx >= 0) BOOKINGS.splice(idx, 1);
+  if (OPEN_GARMENT_ID === garmentId) OPEN_GARMENT_ID = null;
+  renderGarments();
+  renderBookingsSummary();
+}
+
+function garmentDisplayLabel_(g) {
+  const colors = (g.colors || []).join(' / ');
+  return g.name + (colors ? ' (' + colors + ')' : '');
+}
+
+function planDaysFor_(plan, kind) {
+  // kind: 'shoot' | 'event' | undefined
+  // 撮影&イベントプラン: 撮影日=1, イベント日=2
+  if (isShootEventPlan_(plan)) {
+    if (kind === 'shoot') return 1;
+    if (kind === 'event') return 2;
+    return 2; // デフォルト (主たる日数)
+  }
+  // 料金suffix「+6000円」「+ 飲食利用」などを無視してprefixマッチ
+  const baseMap = {
+    '通常プラン【2泊3日】': 2,
+    '通常プラン【3泊4日】': 3,
+    '通常プラン【4泊5日】': 4,
+  };
+  for (const key in baseMap) {
+    if (plan && plan.indexOf(key) === 0) return baseMap[key];
+  }
+  return 2;
+}
+
+function fmtYmd_(ymd) {
+  return (ymd || '').replace(/-/g, '/');
+}
+function fmtEnd_(startYmd, plan, kind) {
+  if (!startYmd) return '';
+  const d = new Date(startYmd + 'T00:00:00');
+  d.setDate(d.getDate() + planDaysFor_(plan, kind));
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function bookingHasDates_(b, plan) {
+  return isShootEventPlan_(plan) ? !!(b.shootDate && b.eventDate) : !!b.startDate;
+}
+
+function renderBookingRow_(b, plan, withRemove) {
+  const isSet = isShootEventPlan_(plan);
+  const rm = withRemove ? `<span data-rmid="${b.garment.id}" style="cursor: pointer; color: var(--ng); margin-left: 8px;">×</span>` : '';
+  if (isSet) {
+    return `
+      <div class="row">
+        <span class="label">${escapeHtml(b.garment.name)}:</span>
+        撮影: ${fmtYmd_(b.shootDate)}〜${fmtEnd_(b.shootDate, plan, 'shoot')} / イベント: ${fmtYmd_(b.eventDate)}〜${fmtEnd_(b.eventDate, plan, 'event')}
+        ${rm}
+      </div>`;
+  }
+  return `
+    <div class="row">
+      <span class="label">${escapeHtml(b.garment.name)}:</span>
+      ${fmtYmd_(b.startDate)} 〜 ${fmtEnd_(b.startDate, plan)}
+      ${rm}
+    </div>`;
+}
+
+function renderBookingsSummary() {
+  const box = $('bookingsSummary');
+  const plan = $('plan').value;
+  const valid = BOOKINGS.filter(b => bookingHasDates_(b, plan));
+  if (!valid.length) {
+    box.classList.add('hidden');
+    $('btnProceed').classList.add('hidden');
+    return;
+  }
+  const rows = valid.map(b => renderBookingRow_(b, plan, true)).join('');
+  box.innerHTML = `
+    <div style="font-weight: 600; color: var(--pink-deep); margin-bottom: 6px;">予約内容 (${valid.length}件):</div>
+    ${rows}
+    <div class="row" style="margin-top: 6px; font-size: 12px; color: var(--gray);">プラン: ${escapeHtml(plan)}</div>
+  `;
+  box.classList.remove('hidden');
+  box.querySelectorAll('[data-rmid]').forEach(el => {
+    el.addEventListener('click', () => removeBooking(el.dataset.rmid));
+  });
+  $('btnProceed').classList.remove('hidden');
+}
+
+function renderBookingSummary() {
+  const plan = $('plan').value;
+  const valid = BOOKINGS.filter(b => bookingHasDates_(b, plan));
+  if (!valid.length) return;
+  const rows = valid.map(b => renderBookingRow_(b, plan, false)).join('');
+  $('bookingSummary').innerHTML = `
+    <div class="selected-box">
+      ${rows}
+      <div class="row" style="margin-top: 4px; font-size: 12px;">プラン: ${escapeHtml(plan)}</div>
+    </div>
+  `;
+}
+
+function toggleShippingFields() {
+  const m = $('receiveMethod').value || '';
+  const isShipping = m.indexOf('郵送') >= 0;
+  $('shippingFields').classList.toggle('hidden', !isShipping);
+  $('shipFeeRow').classList.toggle('hidden', !isShipping);
+}
+
+function onSubmit() {
+  hideError('err2');
+  const validation = validateBookingForm();
+  if (validation) { showError('err2', validation); return; }
+
+  const planBase = $('plan').value;
+  const foodUsage = $('chkFood').checked;
+  const plan = planBase + (foodUsage ? ' + 飲食利用' : '');
+  const isSet = isShootEventPlan_(planBase);
+  const valid = BOOKINGS.filter(b => bookingHasDates_(b, planBase));
+  if (!valid.length) { showError('err2', '衣装と日付を選択してください'); return; }
+
+  // 撮影&イベントプランは衣装1着につき items 2件 (撮影日+イベント日) に展開
+  const items = [];
+  if (isSet) {
+    valid.forEach(b => {
+      items.push({
+        garmentId: b.garment.id,
+        garmentName: '【撮影日】' + garmentDisplayLabel_(b.garment),
+        startDate: b.shootDate,
+        plan: plan,
+        planDaysOverride: 1,
+      });
+      items.push({
+        garmentId: b.garment.id,
+        garmentName: '【イベント日】' + garmentDisplayLabel_(b.garment),
+        startDate: b.eventDate,
+        plan: plan,
+        planDaysOverride: 2,
+      });
+    });
+  } else {
+    valid.forEach(b => {
+      items.push({
+        garmentId: b.garment.id,
+        garmentName: garmentDisplayLabel_(b.garment),
+        startDate: b.startDate,
+        plan: plan,
+      });
+    });
+  }
+  const payload = {
+    items: items,
+    plan: plan,
+    foodUsage: foodUsage,
+    customerName: $('customerName').value.trim(),
+    tel: $('tel').value.trim(),
+    email: $('email').value.trim(),
+    activityName: $('activityName').value.trim(),
+    group: $('group').value.trim(),
+    genres: $('genres').value ? [$('genres').value] : [],
+    useCase: $('useCase').value.trim(),
+    receiveMethod: $('receiveMethod').value,
+    prefecture: $('prefecture').value,
+    postal: $('postal').value.trim(),
+    address: $('address').value.trim(),
+    shippingName: $('shippingName').value.trim(),
+    shippingPostal: $('shippingPostal').value.trim(),
+    shippingAddress: $('shippingAddress').value.trim(),
+    deliveryTime: $('deliveryTime').value,
+    paymentMethod: $('paymentMethod').value,
+    note: $('note').value.trim(),
+    agreementChecked: $('chkAgree').checked,
+    shippingFeeAcknowledged: $('chkShipFee').checked,
+    lineUserId: LINE_USER_ID,
+    lineDisplayName: LINE_DISPLAY_NAME,
+  };
+
+  $('btnSubmit').disabled = true;
+  $('btnSubmit').innerHTML = '<span class="loading"></span>送信中...';
+  LAST_PAYLOAD = payload;
+
+  apiCall('submitMultiBooking', payload)
+    .then(onSubmitResult)
+    .catch(e => {
+      $('btnSubmit').disabled = false;
+      $('btnSubmit').textContent = '予約を申し込む';
+      showError('err2', '送信エラー: ' + e.message);
+    });
+}
+
+function onSubmitResult(res) {
+  $('btnSubmit').disabled = false;
+  $('btnSubmit').textContent = '予約を申し込む';
+  if (!res.ok) {
+    showError('err2', res.message || '送信に失敗しました');
+    if (res.reason === 'taken') {
+      // 競合: カレンダーを開いてる衣装のだけ再ロード
+      if (OPEN_GARMENT_ID) {
+        const b = BOOKINGS.find(x => x.garment.id === OPEN_GARMENT_ID);
+        if (b) {
+          b.calendar = null;
+          const card = document.querySelector(`.garment-card[data-id="${OPEN_GARMENT_ID}"]`);
+          if (card) loadGarmentCalendar(b.garment, card.querySelector('.body'));
+        }
+      }
+    }
+    return;
+  }
+  fillSummaryCopy_(LAST_PAYLOAD);
+  sendLineSummaryIfPossible_(LAST_PAYLOAD);
+  setStep(3);
+}
+
+function fillSummaryCopy_(p) {
+  if (!p || !p.items) return;
+  const itemLines = p.items.map((it, i) =>
+    `${i + 1}. ${it.garmentName}   ${fmtYmd_(it.startDate)} 〜 ${fmtEnd_(it.startDate, it.plan || p.plan)}`
+  );
+  const lines = [
+    `【mi-mi+ レンタル仮予約申込】(${p.items.length}件)`,
+    '',
+    'お名前: ' + (p.customerName || ''),
+    'プラン: ' + (p.plan || '-'),
+    '',
+    '— 予約内容 —',
+    ...itemLines,
+    '',
+    '受取: ' + (p.receiveMethod || '-'),
+    '時間: ' + (p.deliveryTime || '-'),
+    '決済: ' + (p.paymentMethod || '-'),
+    '',
+    '↑ レンタル空き確認フォームから送信しました 🙏'
+  ];
+  $('summaryCopy').value = lines.join('\n');
+}
+
+function copySummary_() {
+  const ta = $('summaryCopy');
+  ta.focus(); ta.select();
+  const done = () => {
+    $('copyDone').classList.remove('hidden');
+    setTimeout(() => $('copyDone').classList.add('hidden'), 4000);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(ta.value).then(done).catch(() => {
+      try { document.execCommand('copy'); done(); } catch (e) { console.warn('copy failed:', e); }
+    });
+  } else {
+    try { document.execCommand('copy'); done(); } catch (e) { console.warn('copy failed:', e); }
+  }
+}
+
+function sendLineSummaryIfPossible_(p) {
+  if (typeof liff === 'undefined' || !IS_IN_LINE || !liff.sendMessages) return;
+  if (!p || !p.items || !p.items.length) return;
+  const itemLines = p.items.map((it, i) =>
+    `${i + 1}. ${it.garmentName}   ${fmtYmd_(it.startDate)} 〜 ${fmtEnd_(it.startDate, it.plan || p.plan)}`
+  );
+  // 予約内容サマリ + 同意確認案内 (テキスト1通) — 末尾の「はい/いいえ」案内は手動返信運用 (Flex内ボタンはLIFFで自分のbubbleには反応しないため)
+  const summaryLines = [
+    `【mi-mi+ レンタル仮予約申込】(${p.items.length}件)`,
+    '',
+    'お名前: ' + (p.customerName || ''),
+    'プラン: ' + (p.plan || '-'),
+    '',
+    '— 予約内容 —',
+    ...itemLines,
+    '',
+    '受取: ' + (p.receiveMethod || '-'),
+    '時間: ' + (p.deliveryTime || '-'),
+    '決済: ' + (p.paymentMethod || '-'),
+    '',
+    '↑ レンタル空き確認フォームから送信しました。',
+    '',
+    '【ご確認のお願い 🙏】',
+    '上記の日程・内容で問題なければ「はい」と、',
+    '修正したい場合は「いいえ」とお返事ください。',
+  ];
+  liff.sendMessages([
+    { type: 'text', text: summaryLines.join('\n') }
+  ])
+    .then(() => console.log('LINE summary sent'))
+    .catch(err => console.warn('liff.sendMessages failed:', err));
+}
+
+function validateBookingForm() {
+  if (!$('customerName').value.trim()) return 'お名前をご入力ください';
+  if (!$('tel').value.trim()) return 'お電話番号をご入力ください';
+  if (!$('email').value.trim()) return 'メールアドレスをご入力ください';
+  if (!$('receiveMethod').value) return '受取方法をお選びください';
+  const plan = $('plan').value;
+  const isSet = isShootEventPlan_(plan);
+  // 撮影&イベントプラン: 各衣装で撮影日とイベント日 両方必須
+  if (isSet) {
+    const partial = BOOKINGS.find(b => (b.shootDate || b.eventDate) && !(b.shootDate && b.eventDate));
+    if (partial) {
+      return partial.garment.name + ' の撮影日とイベント日 両方を選択してください';
+    }
+  }
+  const isShipping = $('receiveMethod').value.indexOf('郵送') >= 0;
+  if (isShipping) {
+    if (!$('postal').value.trim()) return '郵便番号をご入力ください';
+    if (!$('address').value.trim()) return 'ご住所をご入力ください';
+    if (!$('chkShipFee').checked) return '送料発生のご確認にチェックをお願いします';
+  } else {
+    // 対面受取の場合: 月曜日が含まれていたら不可
+    const isMonday = (ymd) => {
+      const d = new Date(ymd + 'T00:00:00');
+      return d.getDay() === 1;
+    };
+    for (const b of BOOKINGS) {
+      if (isSet) {
+        if (b.shootDate && isMonday(b.shootDate)) return b.garment.name + ' の撮影日が月曜開始です。対面受取は月曜お休みのため、郵送に変更いただくか別の日をお選びください';
+        if (b.eventDate && isMonday(b.eventDate)) return b.garment.name + ' のイベント日が月曜開始です。対面受取は月曜お休みのため、郵送に変更いただくか別の日をお選びください';
+      } else {
+        if (b.startDate && isMonday(b.startDate)) return b.garment.name + ' が月曜開始です。対面受取は月曜お休みのため、郵送に変更いただくか別の日をお選びください';
+      }
+    }
+  }
+  if (!$('paymentMethod').value) return '決済方法をお選びください';
+  // コンカフェ/コンセプトカフェ利用なら飲食利用必須
+  const cafeKeywords = ['コンカフェ', 'コンセプトカフェ', 'こんかふぇ'];
+  const fields = [$('useCase').value, $('activityName').value, $('group').value].join(' ').toLowerCase();
+  const isCafeUse = cafeKeywords.some(k => fields.indexOf(k.toLowerCase()) >= 0);
+  if (isCafeUse && !$('chkFood').checked) {
+    return 'コンセプトカフェ等での着用には「飲食利用 (+¥6,000)」のチェックが必須です';
+  }
+  if (!$('chkAgree').checked) return '利用規定にご同意ください';
+  return null;
+}
+
+function formatDateLocal(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+init();
+</script>
+</body>
+</html>
