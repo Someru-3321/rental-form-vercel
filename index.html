@@ -286,8 +286,13 @@
 
       <div id="bookingSummary" style="margin-bottom: 16px;"></div>
 
-      <label class="req" for="customerName">お名前(契約者)</label>
-      <input type="text" id="customerName" placeholder="例: 渡部 由紀">
+      <label for="lineRegistrant">LINE登録者</label>
+      <input type="text" id="lineRegistrant" readonly style="background:#f5f5f5;color:#666" placeholder="LINE連携後、自動入力されます">
+      <div style="font-size:11px;color:var(--gray);margin:-8px 0 12px 0">※LINEで連携したお名前です。変更はできません</div>
+
+      <label class="req" for="customerName">ご契約者氏名 (本名)</label>
+      <input type="text" id="customerName" placeholder="例: 山田 太郎">
+      <div style="font-size:11px;color:var(--gray);margin:-8px 0 12px 0">※契約・お振込時のお名前</div>
 
       <label class="req" for="tel">お電話番号</label>
       <input type="tel" id="tel" placeholder="例: 09012345678">
@@ -297,20 +302,21 @@
 
       <div class="row2">
         <div>
-          <label for="activityName">活動名</label>
-          <input type="text" id="activityName">
+          <label class="req" for="activityName">活動名</label>
+          <input type="text" id="activityName" placeholder="なし or 例: みーみ ちゃん">
         </div>
         <div>
-          <label for="group">所属グループ/店舗</label>
-          <input type="text" id="group">
+          <label class="req" for="group">所属グループ/事務所/店舗</label>
+          <input type="text" id="group" placeholder="なし or 例: 染める株式会社">
         </div>
       </div>
+      <div style="font-size:11px;color:var(--gray);margin:-8px 0 12px 0">※活動なし・一般のお客様は「なし」とご入力ください</div>
 
       <label for="genres">活動ジャンル</label>
       <select id="genres"></select>
 
-      <label for="useCase">使用用途</label>
-      <input type="text" id="useCase" placeholder="例: LIVE出演 / 撮影">
+      <label class="req" for="useCase">使用用途</label>
+      <input type="text" id="useCase" placeholder="例: LIVE出演 / 撮影 / コンセプトカフェ出勤">
 
       <label class="req" for="receiveMethod">受取方法</label>
       <select id="receiveMethod"></select>
@@ -322,16 +328,17 @@
         <div class="row2">
           <div>
             <label class="req" for="postal">郵便番号</label>
-            <input type="text" id="postal" placeholder="1640001">
+            <input type="tel" id="postal" inputmode="numeric" pattern="[0-9]*" maxlength="7" placeholder="1640001 (数字のみ7桁)">
           </div>
           <div>
             <label class="req" for="deliveryTime">お届け時間</label>
             <select id="deliveryTime"></select>
           </div>
         </div>
+        <div style="font-size:11px;color:var(--gray);margin:-8px 0 12px 0">※郵便番号を入れると住所が自動で途中まで入力されます</div>
 
         <label class="req" for="address">ご住所</label>
-        <input type="text" id="address">
+        <input type="text" id="address" placeholder="郵便番号入力後に町名以降を追記してください">
 
         <details>
           <summary>契約者と異なるご住所へ郵送希望の場合</summary>
@@ -361,7 +368,7 @@
       <div class="checkrow">
         <input type="checkbox" id="chkAgree">
         <label for="chkAgree" style="margin: 0; font-weight: 400;">
-          事前に掲載されている【mi-mi+ 衣装レンタル 利用規定】に同意いたします。
+          事前に掲載されている【mi-mi+ 衣装レンタル <a href="https://www.notion.so/" target="_blank" rel="noopener" id="rulesLink" style="color:var(--pink-deep);text-decoration:underline">利用規定</a>】に同意いたします。
         </label>
       </div>
       <div class="checkrow" id="shipFeeRow">
@@ -501,6 +508,10 @@ function init() {
   $('btnSubmit').addEventListener('click', onSubmit);
   $('receiveMethod').addEventListener('change', toggleShippingFields);
 
+  // 郵便番号→住所自動入力
+  attachZipAutoFill_('postal', 'address', 'prefecture');
+  attachZipAutoFill_('shippingPostal', 'shippingAddress', null);
+
   setStep(1);
 }
 
@@ -544,15 +555,55 @@ function initLiff() {
 
 function applyLineProfile() {
   if (!LINE_DISPLAY_NAME) return;
-  const nameInput = $('customerName');
-  if (nameInput && !nameInput.value) {
-    nameInput.placeholder = `LINE登録名: ${LINE_DISPLAY_NAME}`;
-  }
+  // 「LINE登録者」フィールドに自動入力 (readonly)
+  const lineNameInput = $('lineRegistrant');
+  if (lineNameInput) lineNameInput.value = LINE_DISPLAY_NAME;
+  // 「ご契約者氏名」は本名のため、お客様自身に入力させる (placeholder上書きせず)
   // ヘッダーに LINE 連携済みバッジを軽く表示
   const header = document.querySelector('header p');
   if (header && IS_IN_LINE) {
     header.textContent = `LINE: ${LINE_DISPLAY_NAME} 様としてご利用中`;
   }
+}
+
+// 郵便番号 → 住所自動入力 (Zipcloud API)
+async function lookupZipAddress_(zip) {
+  if (!zip || !/^\d{7}$/.test(zip)) return null;
+  try {
+    const res = await fetch('https://zipcloud.ibsnet.co.jp/api/search?zipcode=' + zip);
+    const data = await res.json();
+    if (data.status !== 200 || !data.results || !data.results.length) return null;
+    const r = data.results[0];
+    return {
+      prefecture: r.address1 || '',
+      address: (r.address2 || '') + (r.address3 || '')
+    };
+  } catch (e) {
+    console.warn('zipcloud error:', e);
+    return null;
+  }
+}
+function attachZipAutoFill_(postalId, addressId, prefectureSelectId) {
+  const postal = $(postalId);
+  const address = $(addressId);
+  const pref = $(prefectureSelectId);
+  if (!postal || !address) return;
+  postal.addEventListener('input', async () => {
+    const v = (postal.value || '').replace(/[^0-9]/g, '');
+    postal.value = v;  // 数字以外を弾く
+    if (v.length === 7) {
+      const r = await lookupZipAddress_(v);
+      if (r) {
+        if (pref && r.prefecture) {
+          // option があれば選択
+          const opts = Array.from(pref.options);
+          const m = opts.find(o => o.value === r.prefecture);
+          if (m) pref.value = r.prefecture;
+        }
+        if (!address.value) address.value = r.address;
+      }
+    }
+  });
 }
 
 function closeOrGoLine() {
@@ -1006,6 +1057,7 @@ function onSubmit() {
     plan: plan,
     foodUsage: foodUsage,
     customerName: $('customerName').value.trim(),
+    lineRegistrant: ($('lineRegistrant') && $('lineRegistrant').value.trim()) || '',
     tel: $('tel').value.trim(),
     email: $('email').value.trim(),
     activityName: $('activityName').value.trim(),
@@ -1137,9 +1189,12 @@ function sendLineSummaryIfPossible_(p) {
 }
 
 function validateBookingForm() {
-  if (!$('customerName').value.trim()) return 'お名前をご入力ください';
+  if (!$('customerName').value.trim()) return 'ご契約者氏名(本名)をご入力ください';
   if (!$('tel').value.trim()) return 'お電話番号をご入力ください';
   if (!$('email').value.trim()) return 'メールアドレスをご入力ください';
+  if (!$('activityName').value.trim()) return '活動名をご入力ください (なければ「なし」と)';
+  if (!$('group').value.trim()) return '所属グループ/事務所/店舗をご入力ください (なければ「なし」と)';
+  if (!$('useCase').value.trim()) return '使用用途をご入力ください';
   if (!$('receiveMethod').value) return '受取方法をお選びください';
   const plan = $('plan').value;
   const isSet = isShootEventPlan_(plan);
@@ -1153,6 +1208,7 @@ function validateBookingForm() {
   const isShipping = $('receiveMethod').value.indexOf('郵送') >= 0;
   if (isShipping) {
     if (!$('postal').value.trim()) return '郵便番号をご入力ください';
+    if (!/^\d{7}$/.test($('postal').value.trim())) return '郵便番号は数字7桁でご入力ください (ハイフン不要)';
     if (!$('address').value.trim()) return 'ご住所をご入力ください';
     if (!$('chkShipFee').checked) return '送料発生のご確認にチェックをお願いします';
   } else {
