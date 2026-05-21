@@ -305,20 +305,14 @@
       <label class="req" for="email">メールアドレス</label>
       <input type="email" id="email" placeholder="同意書・請求書をお送りします">
 
-      <div class="row2">
-        <div>
-          <label class="req" for="activityName">活動名</label>
-          <input type="text" id="activityName" placeholder="なし or 例: みーみ ちゃん">
-        </div>
-        <div>
-          <label class="req" for="group">所属グループ/事務所/店舗</label>
-          <input type="text" id="group" placeholder="なし or 例: 染める株式会社">
-        </div>
-      </div>
-      <div style="font-size:11px;color:var(--gray);margin:-8px 0 12px 0">※活動なし・一般のお客様は「なし」とご入力ください</div>
+      <label class="req" for="activityName">活動名</label>
+      <input type="text" id="activityName" placeholder="例: みーみ ちゃん (なければ「なし」)">
 
-      <label for="genres">活動ジャンル</label>
-      <select id="genres"></select>
+      <label class="req" for="group">所属グループ / 事務所 / 店舗</label>
+      <input type="text" id="group" placeholder="例: 染める株式会社 (なければ「なし」)">
+
+      <label class="req" for="genres">活動ジャンル</label>
+      <select id="genres" required></select>
 
       <label class="req" for="useCase">使用用途</label>
       <input type="text" id="useCase" placeholder="例: LIVE出演 / 撮影 / コンセプトカフェ出勤">
@@ -1199,6 +1193,7 @@ function validateBookingForm() {
   if (!$('email').value.trim()) return 'メールアドレスをご入力ください';
   if (!$('activityName').value.trim()) return '活動名をご入力ください (なければ「なし」と)';
   if (!$('group').value.trim()) return '所属グループ/事務所/店舗をご入力ください (なければ「なし」と)';
+  if (!$('genres').value) return '活動ジャンルをお選びください';
   if (!$('useCase').value.trim()) return '使用用途をご入力ください';
   if (!$('receiveMethod').value) return '受取方法をお選びください';
   const plan = $('plan').value;
