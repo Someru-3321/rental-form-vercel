@@ -240,6 +240,57 @@
     .done h2 { border: none; padding: 0; font-size: 18px; }
     details { margin: 12px 0; }
     details summary { font-size: 13px; cursor: pointer; color: var(--gray); }
+    /* ご利用の流れ アコーディオン */
+    .guide-card {
+      border: 1px solid var(--pink);
+      border-radius: 12px;
+      padding: 0;
+      margin: 0 0 16px 0;
+      background: linear-gradient(135deg, #fff 0%, var(--pink-soft) 100%);
+      overflow: hidden;
+    }
+    .guide-card > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 14px 16px;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--pink-deep);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .guide-card > summary::-webkit-details-marker { display: none; }
+    .guide-card > summary::after {
+      content: "▾"; font-size: 12px; transition: transform 0.2s;
+    }
+    .guide-card[open] > summary::after { transform: rotate(180deg); }
+    .guide-card .guide-body {
+      padding: 4px 16px 16px;
+      background: #fff;
+      border-top: 1px solid var(--pink-soft);
+    }
+    .guide-step {
+      display: flex; gap: 12px; padding: 10px 0;
+      border-bottom: 1px solid #f5e8ec;
+    }
+    .guide-step:last-child { border-bottom: none; }
+    .guide-step .num {
+      flex-shrink: 0;
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: var(--pink); color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 600; font-size: 13px;
+    }
+    .guide-step .text { flex: 1; font-size: 13px; line-height: 1.6; color: var(--ink); }
+    .guide-step .text strong { color: var(--pink-deep); }
+    .guide-note {
+      margin-top: 10px;
+      padding: 8px 10px;
+      background: #fff5f8;
+      border-radius: 6px;
+      font-size: 11px;
+      color: var(--gray);
+    }
   </style>
 </head>
 <body>
@@ -253,6 +304,36 @@
         <div class="step-dot" id="dot3"></div>
       </div>
     </header>
+
+    <!-- ご利用の流れ (初めての方向け) -->
+    <details class="guide-card" id="guideCard" open>
+      <summary>🤍 初めての方へ — ご利用の流れ</summary>
+      <div class="guide-body">
+        <div class="guide-step">
+          <div class="num">1</div>
+          <div class="text"><strong>このフォームで申込</strong><br>お衣装・日付・お届け先を選択 → 「ご予約を申し込む」をタップ</div>
+        </div>
+        <div class="guide-step">
+          <div class="num">2</div>
+          <div class="text"><strong>LINEで自動通知 + 確認</strong><br>申込内容がLINEに届きます。内容に問題なければ「はい」とご返信ください</div>
+        </div>
+        <div class="guide-step">
+          <div class="num">3</div>
+          <div class="text"><strong>同意書・お支払い</strong><br>mi-mi+ から同意書とご請求書を別途お送りします。ご署名・お支払いをお願いします</div>
+        </div>
+        <div class="guide-step">
+          <div class="num">4</div>
+          <div class="text"><strong>完了報告 → 発送</strong><br>リッチメニュー「同意書・お支払い 完了報告」をタップ → mi-mi+ がご発送いたします</div>
+        </div>
+        <div class="guide-step">
+          <div class="num">5</div>
+          <div class="text"><strong>ご利用後、ご返送</strong><br>レンタル期間終了後、同梱の伝票でご返送ください</div>
+        </div>
+        <div class="guide-note">
+          ご不明点は下の「LINEで相談する」ボタン、またはリッチメニュー「お問い合わせ」からお気軽にどうぞ
+        </div>
+      </div>
+    </details>
 
     <!-- Step1: 衣装選択 + カレンダー -->
     <section id="step1" class="card">
@@ -459,6 +540,9 @@ function setStep(n) {
   ['dot1','dot2','dot3'].forEach((id, i) => {
     $(id).classList.toggle('active', i + 1 <= n);
   });
+  // ご利用の流れは Step1 でのみ表示
+  const guide = $('guideCard');
+  if (guide) guide.classList.toggle('hidden', n !== 1);
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
