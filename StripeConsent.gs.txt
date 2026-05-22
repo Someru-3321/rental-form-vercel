@@ -57,6 +57,9 @@ function getBookingForConsent_(payload) {
 
   const email = (props['【契約者】メールアドレス'] && props['【契約者】メールアドレス'].email) || '';
 
+  // 明細計算 (衣装/プラン/オプション/送料/割引/税)
+  const breakdown = calculateBreakdown_(props);
+
   return {
     ok: true,
     booking: {
@@ -64,8 +67,9 @@ function getBookingForConsent_(payload) {
       garmentNames: garmentNames,
       period: period,
       plan: plan,
-      amount: amountStored || calculateAmount_(plan, props),
+      amount: amountStored || breakdown.total,
       email: email,
+      breakdown: breakdown,
     },
   };
 }
@@ -89,18 +93,166 @@ function notionGetPage_(pageId) {
   return JSON.parse(res.getContentText());
 }
 
-function calculateAmount_(plan, props) {
-  if (!plan) return 0;
-  let base = 0;
-  if (plan.indexOf('2泊3日') >= 0) base = 17000;
-  else if (plan.indexOf('3泊4日') >= 0) base = 23000;
-  else if (plan.indexOf('4泊5日') >= 0) base = 29000;
-  else if (plan.indexOf('5泊6日') >= 0) base = 27000;
-  else if (plan.indexOf('撮影&イベント') >= 0) base = 24000;
-  if (plan.indexOf('飲食利用') >= 0) base += 6000;
+// =============================================================
+// 料金明細計算 (Notion 料金マニュアル【社内用】準拠)
+// 参照: https://www.notion.so/368f0338a7bf819abad9c8460004c401
+//
+// 戻り値: { items: [{label, amount, qty}], subtotal, discounts, total, taxIncluded, taxAmount }
+//   - amount は 税込 で表示
+//   - 内消費税 (10%) を taxAmount に算出
+// =============================================================
+function calculateBreakdown_(props) {
+  const plan = (props['レンタルプラン'] && props['レンタルプラン'].select ? props['レンタルプラン'].select.name : '') || '';
+  const items = [];
+
+  // ① 衣装ベース価格 — レンタル衣装(決定) リレーションから 値段 を取得
+  let garmentBaseTotal = 0;
+  const garmentRefs = (props['レンタル衣装(決定)'] && props['レンタル衣装(決定)'].relation) || [];
+  const garmentNamesParsed = [];
+  if (garmentRefs.length) {
+    for (let i = 0; i < garmentRefs.length; i++) {
+      const gPrice = getGarmentPrice_(garmentRefs[i].id);
+      const gName = gPrice.name || ('衣装' + (i + 1));
+      garmentNamesParsed.push(gName);
+      const price = gPrice.price || 15000;
+      garmentBaseTotal += price;
+      items.push({ label: '衣装料金: ' + gName, amount: price, qty: 1 });
+    }
+  } else {
+    // フォールバック: 予約情報 要約 から衣装名を抽出 (相互運用)
+    let fallbackName = '';
+    if (props['予約情報 要約'] && props['予約情報 要約'].rich_text) {
+      const sum = props['予約情報 要約'].rich_text.map(r => r.plain_text || '').join('');
+      const m = sum.match(/【衣装】([^\n]+)/);
+      if (m) fallbackName = m[1].trim();
+    }
+    const fallbackPrice = guessPriceByName_(fallbackName);
+    garmentBaseTotal = fallbackPrice;
+    items.push({ label: '衣装料金' + (fallbackName ? ': ' + fallbackName : ''), amount: fallbackPrice, qty: 1 });
+  }
+
+  // ② プラン別追加料金
+  let planAddon = 0;
+  let planAddonLabel = '';
+  if (plan.indexOf('3泊4日') >= 0) {
+    planAddon = 6000; planAddonLabel = 'プラン追加: 3泊4日 (1日延長)';
+  } else if (plan.indexOf('4泊5日') >= 0) {
+    planAddon = 12000; planAddonLabel = 'プラン追加: 4泊5日 (2日延長)';
+  } else if (plan.indexOf('5泊6日') >= 0) {
+    planAddon = 10000; planAddonLabel = 'プラン追加: 5泊6日';
+  } else if (plan.indexOf('撮影&イベント') >= 0 || plan.indexOf('撮影&イベント') >= 0) {
+    planAddon = 7000; planAddonLabel = 'プラン追加: 撮影&イベントプラン';
+  }
+  if (planAddon > 0) {
+    items.push({ label: planAddonLabel, amount: planAddon, qty: 1 });
+  }
+
+  // ③ 飲食利用オプション (プラン名 or +追加オプション どちらでも検出)
+  const planSaysDrink = plan.indexOf('飲食利用') >= 0;
+  const opts = (props['+追加オプション'] && props['+追加オプション'].multi_select) || [];
+  const optsHasDrink = opts.some(o => (o.name || '').indexOf('飲食利用') >= 0);
+  if (planSaysDrink || optsHasDrink) {
+    items.push({ label: 'オプション: 飲食利用', amount: 6000, qty: 1 });
+  }
+
+  // ④ 送料 (郵送お届け の場合のみ +¥1,500)
   const recv = props['お受け取り方法'] && props['お受け取り方法'].select && props['お受け取り方法'].select.name;
-  if (recv && recv.indexOf('郵送') >= 0) base += 1500;
-  return base;
+  if (recv && recv.indexOf('郵送') >= 0) {
+    items.push({ label: '送料: 郵送お届け (レターパックプラス)', amount: 1500, qty: 1 });
+  }
+
+  // 小計 (割引前)
+  let subtotal = 0;
+  items.forEach(it => { subtotal += it.amount * (it.qty || 1); });
+
+  // ⑤ ディスカウント (2着同時 -10%, 手動 ¥2,000 / ¥3,000 オフ, etc.)
+  const discounts = [];
+  if (garmentRefs.length >= 2 && opts.some(o => (o.name || '').indexOf('2着同時') >= 0)) {
+    // 衣装小計の10% (送料・オプション除く)
+    const discount = Math.round(garmentBaseTotal * 0.1);
+    discounts.push({ label: '2着同時レンタル割引 (-10%)', amount: -discount });
+  }
+  const discMs = (props['+ディスカウント'] && props['+ディスカウント'].multi_select) || [];
+  discMs.forEach(d => {
+    const n = d.name || '';
+    if (n.indexOf('-¥2000') >= 0) discounts.push({ label: '個別割引', amount: -2000 });
+    else if (n.indexOf('-¥3000') >= 0) discounts.push({ label: '個別割引', amount: -3000 });
+    else if (n.indexOf('延滞料金') >= 0) {
+      // 延滞料金は別管理 (返却後加算)。ここでは含めない
+    }
+  });
+  let discountTotal = 0;
+  discounts.forEach(d => { discountTotal += d.amount; });
+
+  const total = Math.max(0, subtotal + discountTotal);
+  // 内消費税 (10%) — 税込価格から逆算
+  const taxAmount = Math.round(total * 10 / 110);
+
+  return {
+    items: items,
+    discounts: discounts,
+    subtotal: subtotal,
+    discountTotal: discountTotal,
+    total: total,
+    taxAmount: taxAmount,
+    taxIncluded: true,
+    garmentNames: garmentNamesParsed.join(' / '),
+  };
+}
+
+// 後方互換 (古い呼び出し箇所用)
+function calculateAmount_(plan, props) {
+  return calculateBreakdown_(props).total;
+}
+
+// =============================================================
+// 衣装DB から 値段 と 名前 を取得 (1ページ単位)
+// 取得失敗時は デフォルト ¥15,000 で返す
+// =============================================================
+const _garmentPriceCache = {};
+
+function getGarmentPrice_(garmentPageId) {
+  if (!garmentPageId) return { price: 15000, name: '' };
+  if (_garmentPriceCache[garmentPageId]) return _garmentPriceCache[garmentPageId];
+
+  const page = notionGetPage_(garmentPageId);
+  if (!page) {
+    const fallback = { price: 15000, name: '' };
+    _garmentPriceCache[garmentPageId] = fallback;
+    return fallback;
+  }
+  const p = page.properties || {};
+  let name = '';
+  // タイトル列を見つける
+  for (const key in p) {
+    if (p[key] && p[key].type === 'title' && p[key].title) {
+      name = p[key].title.map(t => t.plain_text || '').join('');
+      break;
+    }
+  }
+  let price = 0;
+  if (p['値段'] && typeof p['値段'].number === 'number') {
+    price = p['値段'].number;
+  } else if (p['価格'] && typeof p['価格'].number === 'number') {
+    price = p['価格'].number;
+  } else {
+    price = guessPriceByName_(name);
+  }
+  if (!price) price = 15000;
+
+  const result = { price: price, name: name };
+  _garmentPriceCache[garmentPageId] = result;
+  return result;
+}
+
+// 名前からプレミアム判定 (リレーション解決できなかった場合のフォールバック)
+function guessPriceByName_(name) {
+  if (!name) return 15000;
+  const premium = ['メルティ', 'みみぐるみ', 'バタフライガーデン', 'エターナルブルー', 'ロゼノワール'];
+  for (let i = 0; i < premium.length; i++) {
+    if (name.indexOf(premium[i]) >= 0) return 16000;
+  }
+  return 15000;
 }
 
 
@@ -179,24 +331,27 @@ function saveConsent_(payload) {
         muteHttpExceptions: true,
       });
 
-      // LINEで決済URLをお客様に送信
+      // LINEで決済URLをお客様に送信 (明細付き)
       if (payload.lineUserId) {
+        const breakdownLines = buildBreakdownTextLines_(booking.breakdown);
         const lineMsg = [
           '同意書のご署名、誠にありがとうございました🤍',
           '',
           '続きまして、お支払いのご案内です。',
           '',
-          '【ご請求金額】¥' + Number(booking.amount).toLocaleString(),
+          '【ご請求金額 内訳】',
+        ].concat(breakdownLines).concat([
           '',
           '下記リンクよりお支払いをお願いいたします:',
           '▼ お支払い (クレカ / コンビニ / PayPay)',
           paymentUrl,
           '',
+          '※ 上記金額には消費税(10%)が含まれます',
           '※ 領収書をご希望の方は、お支払い後に',
           '   「領収書ください」と本トークにご返信ください。',
           '',
           'お支払い完了次第、ご発送の準備を進めます。',
-        ].join('\n');
+        ]).join('\n');
         pushLineMessageToUser_(payload.lineUserId, lineMsg);
       }
     }
@@ -204,7 +359,13 @@ function saveConsent_(payload) {
 
   notifyConsentSubmitted_(payload, booking, fileUrl, paymentUrl);
 
-  return { ok: true, amount: booking.amount, paymentUrl: paymentUrl, sessionId: sessionId };
+  return {
+    ok: true,
+    amount: booking.amount,
+    breakdown: booking.breakdown || null,
+    paymentUrl: paymentUrl,
+    sessionId: sessionId,
+  };
 }
 
 
@@ -220,7 +381,7 @@ function createStripeCheckoutSession_(pageId, booking) {
   const amount = booking.amount;
   if (!amount || amount <= 0) return null;
 
-  const productName = 'mi-mi+ レンタル料金 ' + (booking.customerName || '') + ' 様';
+  const customerSuffix = (booking.customerName || '') + ' 様';
   const description = [booking.garmentNames || '', booking.period || ''].filter(Boolean).join(' / ');
 
   // form-encoded params (Stripe API は application/x-www-form-urlencoded)
@@ -229,11 +390,6 @@ function createStripeCheckoutSession_(pageId, booking) {
     'payment_method_types[0]': 'card',
     'payment_method_types[1]': 'konbini',
     'payment_method_types[2]': 'paypay',
-    'line_items[0][price_data][currency]': 'jpy',
-    'line_items[0][price_data][product_data][name]': productName,
-    'line_items[0][price_data][product_data][description]': description,
-    'line_items[0][price_data][unit_amount]': String(amount),
-    'line_items[0][quantity]': '1',
     'metadata[pageId]': pageId,
     'metadata[customerName]': booking.customerName || '',
     'metadata[period]': booking.period || '',
@@ -242,11 +398,43 @@ function createStripeCheckoutSession_(pageId, booking) {
     'locale': 'ja',
     'payment_method_options[konbini][expires_after_days]': '3',
   };
+
+  // 明細を line_items として送信
+  // Stripe Checkout は line_items[N][price_data] で複数行を表示できる
+  const items = (booking.breakdown && booking.breakdown.items) || [];
+  const discounts = (booking.breakdown && booking.breakdown.discounts) || [];
+
+  if (items.length > 0) {
+    let idx = 0;
+    items.forEach(it => {
+      params['line_items[' + idx + '][price_data][currency]'] = 'jpy';
+      params['line_items[' + idx + '][price_data][product_data][name]'] = it.label;
+      params['line_items[' + idx + '][price_data][product_data][description]'] = customerSuffix;
+      params['line_items[' + idx + '][price_data][unit_amount]'] = String(it.amount);
+      params['line_items[' + idx + '][quantity]'] = String(it.qty || 1);
+      idx++;
+    });
+    // 割引 (マイナス金額) は coupon 経由でないと line_items に入れられないため、
+    // 一旦 0円 line item として表示しつつ、Total から減算する仕組みで対処:
+    //   → Stripe Checkout の coupon を都度作成して適用
+    if (discounts.length > 0) {
+      const couponId = createStripeCouponForDiscounts_(secret, discounts);
+      if (couponId) {
+        params['discounts[0][coupon]'] = couponId;
+      }
+    }
+  } else {
+    // フォールバック: 単一 line item
+    params['line_items[0][price_data][currency]'] = 'jpy';
+    params['line_items[0][price_data][product_data][name]'] = 'mi-mi+ レンタル料金 ' + customerSuffix;
+    params['line_items[0][price_data][product_data][description]'] = description;
+    params['line_items[0][price_data][unit_amount]'] = String(amount);
+    params['line_items[0][quantity]'] = '1';
+  }
+
   if (booking.email) {
     params['customer_email'] = booking.email;
   }
-  // 領収書自動メール送信は OFF (希望者のみ運用)
-  // params['payment_intent_data[receipt_email]'] = booking.email; // 全件発行する場合
 
   const res = UrlFetchApp.fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'post',
@@ -259,6 +447,56 @@ function createStripeCheckoutSession_(pageId, booking) {
     return null;
   }
   return JSON.parse(res.getContentText());
+}
+
+// 割引を都度クーポン化して Checkout に適用 (mode: payment 用)
+function createStripeCouponForDiscounts_(secret, discounts) {
+  let total = 0;
+  const labels = [];
+  discounts.forEach(d => {
+    total += Math.abs(d.amount);
+    labels.push(d.label);
+  });
+  if (total <= 0) return '';
+
+  const params = {
+    'amount_off': String(total),
+    'currency': 'jpy',
+    'duration': 'once',
+    'name': labels.join(' + '),
+  };
+  const res = UrlFetchApp.fetch('https://api.stripe.com/v1/coupons', {
+    method: 'post',
+    headers: { 'Authorization': 'Bearer ' + secret },
+    payload: params,
+    muteHttpExceptions: true,
+  });
+  if (res.getResponseCode() !== 200) {
+    console.warn('Stripe coupon error:', res.getContentText().substring(0, 300));
+    return '';
+  }
+  const data = JSON.parse(res.getContentText());
+  return data.id || '';
+}
+
+// 明細を LINE / Slack 用テキストに整形
+function buildBreakdownTextLines_(breakdown) {
+  if (!breakdown || !breakdown.items) return ['(明細なし)'];
+  const lines = [];
+  breakdown.items.forEach(it => {
+    lines.push('・' + it.label + ' ¥' + Number(it.amount).toLocaleString());
+  });
+  if (breakdown.discounts && breakdown.discounts.length) {
+    breakdown.discounts.forEach(d => {
+      lines.push('・' + d.label + ' ¥' + Number(d.amount).toLocaleString());
+    });
+  }
+  lines.push('─────────────');
+  lines.push('合計: ¥' + Number(breakdown.total).toLocaleString() + ' (税込)');
+  if (breakdown.taxAmount) {
+    lines.push('  (内消費税10%: ¥' + Number(breakdown.taxAmount).toLocaleString() + ')');
+  }
+  return lines;
 }
 
 
@@ -518,6 +756,7 @@ function sendConsentUrlOnConfirm_(lineUserId, pageId) {
 function notifyConsentSubmitted_(payload, booking, signatureUrl, paymentUrl) {
   const url = PropertiesService.getScriptProperties().getProperty('SLACK_WEBHOOK_URL');
   if (!url) return;
+  const breakdownLines = booking.breakdown ? buildBreakdownTextLines_(booking.breakdown) : ['¥' + Number(booking.amount || 0).toLocaleString()];
   const text = [
     ':white_check_mark: *同意書 ご提出* (mi-mi+ レンタル)',
     '',
@@ -525,11 +764,13 @@ function notifyConsentSubmitted_(payload, booking, signatureUrl, paymentUrl) {
     'お衣装: ' + (booking.garmentNames || '-'),
     '期間: ' + (booking.period || '-'),
     'プラン: ' + (booking.plan || '-'),
-    '金額: ¥' + Number(booking.amount || 0).toLocaleString(),
+    '',
+    '*ご請求 内訳:*',
+  ].concat(breakdownLines).concat([
     '',
     paymentUrl ? ':credit_card: Stripe Checkout: ' + paymentUrl + ' (お客様にLINE送信済)' : ':warning: Stripe Checkout未発行',
     '署名画像: ' + signatureUrl,
-  ].join('\n');
+  ]).join('\n');
   try {
     UrlFetchApp.fetch(url, {
       method: 'post',

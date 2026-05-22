@@ -346,6 +346,40 @@
       color: var(--ink);
       margin: 10px 0;
     }
+
+    /* 明細 (内訳) テーブル */
+    .breakdown {
+      margin: 8px 0 4px;
+      padding: 12px 14px;
+      background: #f5fbfd;
+      border: 1px solid var(--line-color);
+      border-radius: 10px;
+      text-align: left;
+      font-size: 13px;
+    }
+    .breakdown .bd-row {
+      display: flex; justify-content: space-between;
+      padding: 4px 0;
+      color: var(--ink);
+    }
+    .breakdown .bd-row .lbl {
+      flex: 1;
+      padding-right: 8px;
+      color: var(--ink-light);
+    }
+    .breakdown .bd-row.discount .val { color: var(--pink-deep); }
+    .breakdown .bd-row.total {
+      border-top: 1px solid var(--line-color);
+      margin-top: 6px; padding-top: 8px;
+      font-weight: 600;
+    }
+    .breakdown .bd-row.total .lbl { color: var(--ink); }
+    .breakdown .bd-tax {
+      font-size: 11px;
+      color: var(--ink-light);
+      text-align: right;
+      margin-top: 4px;
+    }
     .done-screen .pay-btn {
       display: inline-block;
       background: var(--pink);
@@ -527,6 +561,31 @@
   let PAGE_ID = ''; // Notion page ID from URL ?pid=...
   let SCROLLED_TO_END = false;
   let SIGNATURE_HAS_INK = false;
+  let LATEST_BOOKING = null;
+
+  // ===== 明細レンダリング =====
+  function renderBreakdown_(breakdown, fallbackAmount) {
+    if (!breakdown || !breakdown.items || !breakdown.items.length) {
+      // フォールバック: 単一金額表示
+      const amt = fallbackAmount ? '¥' + Number(fallbackAmount).toLocaleString() : '別途ご案内';
+      return '<div class="row"><span class="label">ご請求金額</span><span class="val">' + amt + '</span></div>';
+    }
+    const itemsHtml = breakdown.items.map(it => {
+      const amt = '¥' + Number(it.amount).toLocaleString();
+      return `<div class="bd-row"><span class="lbl">${escapeHtml_(it.label)}</span><span class="val">${amt}</span></div>`;
+    }).join('');
+    const discHtml = (breakdown.discounts || []).map(d => {
+      const amt = '¥' + Number(d.amount).toLocaleString();
+      return `<div class="bd-row discount"><span class="lbl">${escapeHtml_(d.label)}</span><span class="val">${amt}</span></div>`;
+    }).join('');
+    const totalHtml = `<div class="bd-row total"><span class="lbl">合計 (税込)</span><span class="val">¥${Number(breakdown.total).toLocaleString()}</span></div>`;
+    const taxHtml = breakdown.taxAmount ? `<div class="bd-tax">うち消費税(10%): ¥${Number(breakdown.taxAmount).toLocaleString()}</div>` : '';
+    return `<div class="row"><span class="label">ご請求 内訳</span></div><div class="breakdown">${itemsHtml}${discHtml}${totalHtml}${taxHtml}</div>`;
+  }
+
+  function escapeHtml_(s) {
+    return String(s || '').replace(/[&<>"']/g, m => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
+  }
 
   // ===== Helpers =====
   const $ = id => document.getElementById(id);
@@ -581,13 +640,14 @@
       const d = await apiCall('getBookingForConsent', { pageId: PAGE_ID, lineUserId: LINE_USER_ID });
       if (!d || !d.ok) throw new Error(d && d.message || 'データ取得失敗');
       const b = d.booking;
-      $('bookingRows').innerHTML = [
+      LATEST_BOOKING = b;
+      const baseRows = [
         ['お名前', (b.customerName || '') + ' 様'],
         ['お衣装', b.garmentNames || '-'],
         ['ご利用期間', b.period || '-'],
         ['プラン', b.plan || '-'],
-        ['ご請求金額', b.amount ? '¥' + Number(b.amount).toLocaleString() : '別途ご案内'],
       ].map(r => `<div class="row"><span class="label">${r[0]}</span><span class="val">${r[1]}</span></div>`).join('');
+      $('bookingRows').innerHTML = baseRows + renderBreakdown_(b.breakdown, b.amount);
     } catch (e) {
       console.warn(e);
       $('bookingRows').innerHTML = '<div class="row"><span class="val">⚠️ ご予約情報の取得に失敗しました</span></div>';
@@ -721,10 +781,21 @@
       // Show done view
       $('mainView').classList.add('hidden');
       $('doneView').classList.remove('hidden');
+      const bd = res.breakdown || (LATEST_BOOKING && LATEST_BOOKING.breakdown);
       if (res.amount) {
         $('payAmount').textContent = '¥' + Number(res.amount).toLocaleString();
       } else {
         $('payAmount').textContent = '別途ご案内';
+      }
+      // done view にも明細表示
+      if (bd && bd.items && bd.items.length) {
+        const $card = $('payCard');
+        const bdHtml = renderBreakdown_(bd, res.amount);
+        // 一旦 amount の下に挿入
+        const $amt = $('payAmount');
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = bdHtml;
+        $amt.insertAdjacentElement('afterend', wrapper);
       }
       if (res.paymentUrl) {
         $('payBtn').href = res.paymentUrl;
