@@ -27,6 +27,46 @@
 
 
 // =============================================================
+// 都道府県別お届け日数 API (Notion DB: 1bbf0338-a7bf-8128-88a5-000b20edbb2c)
+// 戻り値: { ok: true, days: { '東京都': 1, '北海道': 2, ... } }
+// =============================================================
+const DELIVERY_DAYS_DS = '1bbf0338-a7bf-8128-88a5-000b20edbb2c';
+let _deliveryDaysCache = null;
+
+function getDeliveryDaysMap_() {
+  if (_deliveryDaysCache) return _deliveryDaysCache;
+  const token = PropertiesService.getScriptProperties().getProperty('NOTION_TOKEN');
+  if (!token) return { ok: false, days: {} };
+  const queryUrl = NOTION_API + '/data_sources/' + DELIVERY_DAYS_DS + '/query';
+  const map = {};
+  let cursor = null;
+  do {
+    const body = { page_size: 100 };
+    if (cursor) body.start_cursor = cursor;
+    const res = UrlFetchApp.fetch(queryUrl, {
+      method: 'post',
+      headers: { 'Authorization': 'Bearer ' + token, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
+      payload: JSON.stringify(body),
+      muteHttpExceptions: true,
+    });
+    if (res.getResponseCode() !== 200) {
+      console.warn('Delivery days query error:', res.getContentText().substring(0, 300));
+      return { ok: false, days: {} };
+    }
+    const data = JSON.parse(res.getContentText());
+    (data.results || []).forEach(p => {
+      const titleStr = ((p.properties['都道府県'] && p.properties['都道府県'].title) || []).map(t => t.plain_text || '').join('').trim();
+      const days = (p.properties['日数'] && typeof p.properties['日数'].number === 'number') ? p.properties['日数'].number : 1;
+      if (titleStr) map[titleStr] = days;
+    });
+    cursor = data.has_more ? data.next_cursor : null;
+  } while (cursor);
+  _deliveryDaysCache = { ok: true, days: map };
+  return _deliveryDaysCache;
+}
+
+
+// =============================================================
 // 同意書ページ用: Notion 予約情報を取得して返す
 // =============================================================
 function getBookingForConsent_(payload) {
@@ -166,7 +206,7 @@ function calculateBreakdown_(props) {
   // ④ 送料 (郵送お届け の場合のみ +¥1,500)
   const recv = props['お受け取り方法'] && props['お受け取り方法'].select && props['お受け取り方法'].select.name;
   if (recv && recv.indexOf('郵送') >= 0) {
-    items.push({ label: '送料: 郵送お届け (レターパックプラス)', amount: 1500, qty: 1 });
+    items.push({ label: '送料: 郵送お届け', amount: 1500, qty: 1 });
   }
 
   // 小計 (割引前)
@@ -792,6 +832,120 @@ function notifyConsentSubmitted_(payload, booking, signatureUrl, paymentUrl) {
   } catch (e) {
     console.warn('Slack notify error:', e);
   }
+}
+
+
+// =============================================================
+// =============================================================
+// ヤマトB2 CSV 自動生成 (出荷ラベル一括印刷用)
+// 毎朝 8:00 JST にトリガーで実行 (Apps Script Triggers で設定)
+// 「契約済 郵送待ち」かつ 郵送 のレコードを抽出 → CSV作成 → Gmail で送信
+// =============================================================
+function dailyYamatoB2Csv() {
+  const token = PropertiesService.getScriptProperties().getProperty('NOTION_TOKEN');
+  if (!token) return;
+
+  const tz = 'Asia/Tokyo';
+  const today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+
+  const queryBody = {
+    filter: {
+      and: [
+        { property: 'ステータス', status: { equals: '契約済 郵送待ち' } },
+        { property: 'お受け取り方法', select: { does_not_equal: '対面受け取り【中野駅北口 徒歩5分】' } },
+      ],
+    },
+    page_size: 50,
+  };
+  const queryRes = UrlFetchApp.fetch(NOTION_API + '/data_sources/' + RESERVATION_DS + '/query', {
+    method: 'post',
+    headers: { 'Authorization': 'Bearer ' + token, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
+    payload: JSON.stringify(queryBody),
+    muteHttpExceptions: true,
+  });
+  if (queryRes.getResponseCode() !== 200) {
+    console.warn('Yamato CSV query error:', queryRes.getContentText().substring(0, 300));
+    return;
+  }
+  const data = JSON.parse(queryRes.getContentText());
+  if (!data.results || !data.results.length) {
+    console.log('本日出荷予定なし');
+    return;
+  }
+
+  const headers = [
+    'お客様管理番号', '伝票種類', '出荷予定日', 'お届け予定日', '配達時間帯',
+    'お届け先電話番号', 'お届け先郵便番号', 'お届け先住所', 'お届け先アパートマンション名', 'お届け先名',
+    '品名1', '個数', 'ご依頼主郵便番号', 'ご依頼主住所', 'ご依頼主名', 'ご依頼主電話番号',
+  ];
+  const rows = [headers];
+  const senderInfo = {
+    name: 'mi-mi+ (染める株式会社)',
+    postal: '1640001',
+    address: '東京都中野区中野5-46-9 ABCハウス101 mi-miアトリエ',
+    tel: '03-6823-3481',
+  };
+
+  data.results.forEach(p => {
+    const props = p.properties;
+    const titleStr = ((props['ご予約名'] && props['ご予約名'].title) || []).map(t => t.plain_text || '').join('');
+    const customerName = titleStr.replace(/\s*\(.+\)$/, '').replace(/\s*様$/, '').trim();
+    const postal = ((props['郵便番号'] && props['郵便番号'].rich_text) || []).map(r => r.plain_text || '').join('').replace(/-/g, '').trim();
+    const address = ((props['住所'] && props['住所'].rich_text) || []).map(r => r.plain_text || '').join('').trim();
+    const tel = (props['【契約者】TEL'] && props['【契約者】TEL'].phone_number) || '';
+    const deliveryTime = (props['お届け指定'] && props['お届け指定'].select && props['お届け指定'].select.name) || '';
+    const rentalDate = (props['レンタル日'] && props['レンタル日'].date && props['レンタル日'].date.start) || '';
+
+    let shipDate = today.replace(/-/g, '/').replace(/^(\d{4})\/0?(\d+)\/0?(\d+)$/, '$1/$2/$3');
+    let deliveryDate = '';
+    if (rentalDate) {
+      const dRent = new Date(rentalDate + 'T00:00:00');
+      const dShip = new Date(dRent); dShip.setDate(dShip.getDate() - 1);
+      shipDate = Utilities.formatDate(dShip, tz, 'yyyy/M/d');
+      deliveryDate = Utilities.formatDate(dRent, tz, 'yyyy/M/d');
+    }
+
+    const timeMap = {
+      '午前中': '0812', '14:00~16:00': '1416', '16:00~18:00': '1618',
+      '18:00~20:00': '1820', '19:00~21:00': '1921', '時間指定なし': '',
+    };
+    const timeCode = timeMap[deliveryTime] || '';
+
+    const altPostal = ((props['郵送先 郵便番号'] && props['郵送先 郵便番号'].rich_text) || []).map(r => r.plain_text || '').join('').trim();
+    const altAddress = ((props['郵送先 住所'] && props['郵送先 住所'].rich_text) || []).map(r => r.plain_text || '').join('').trim();
+    const altName = ((props['郵送先名義'] && props['郵送先名義'].rich_text) || []).map(r => r.plain_text || '').join('').trim();
+
+    const finalPostal = altPostal ? altPostal.replace(/-/g, '') : postal;
+    const finalAddress = altAddress || address;
+    const finalName = altName || customerName;
+
+    rows.push([
+      p.id.substring(0, 12), '0', shipDate, deliveryDate, timeCode,
+      tel, finalPostal, finalAddress, '', finalName + ' 様',
+      'mi-mi+ レンタル衣装', '1', senderInfo.postal, senderInfo.address, senderInfo.name, senderInfo.tel,
+    ]);
+  });
+
+  const csvContent = '﻿' + rows.map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(',')).join('\r\n');
+
+  const recipient = PropertiesService.getScriptProperties().getProperty('YAMATO_CSV_RECIPIENT') || Session.getActiveUser().getEmail() || 'yuki.watabe@someru.me';
+  const filename = 'yamato_b2_' + Utilities.formatDate(new Date(), tz, 'yyyyMMdd') + '.csv';
+  const blob = Utilities.newBlob(csvContent, 'text/csv', filename);
+
+  GmailApp.sendEmail(recipient, '[mi-mi+] ヤマトB2 当日出荷CSV (' + data.results.length + '件)',
+    '本日出荷予定の郵送レンタル: ' + data.results.length + '件\n\n添付CSVをB2クラウドにアップロードして送り状を一括印刷してください。\n\nB2クラウド: https://bmypage.kuronekoyamato.co.jp/\n\n--\nmi-mi+ レンタル管理システム',
+    { attachments: [blob], name: 'mi-mi+ 管理' }
+  );
+
+  const slackUrl = PropertiesService.getScriptProperties().getProperty('SLACK_WEBHOOK_URL');
+  if (slackUrl) {
+    UrlFetchApp.fetch(slackUrl, {
+      method: 'post', contentType: 'application/json',
+      payload: JSON.stringify({ text: ':truck: *本日出荷予定* (' + data.results.length + '件) — Gmail に B2クラウド用 CSV を送信しました' }),
+      muteHttpExceptions: true,
+    });
+  }
+  console.log('Yamato CSV sent:', data.results.length, '件');
 }
 
 

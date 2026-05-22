@@ -622,7 +622,55 @@ function onConfig(cfg) {
   $('genres').insertAdjacentHTML('afterbegin', '<option value="">選択してください</option>');
   $('genres').value = '';
   toggleShippingFields();
+  // 都道府県別お届け日数マップを取得 (郵送選択時のmin date計算用)
+  fetchDeliveryDays_();
+  // 都道府県/受取方法 変更時に最短日警告
+  $('prefecture').addEventListener('change', checkPrefectureDeliveryConstraint_);
+  $('receiveMethod').addEventListener('change', checkPrefectureDeliveryConstraint_);
   initLiff();
+}
+
+// 都道府県別お届け日数マップを取得
+let DELIVERY_DAYS_MAP = {}; // prefecture name → days
+function fetchDeliveryDays_() {
+  apiCall('getDeliveryDays', {})
+    .then(res => {
+      if (res && res.ok && res.days) {
+        DELIVERY_DAYS_MAP = res.days;
+        console.log('Delivery days loaded:', Object.keys(DELIVERY_DAYS_MAP).length, '都道府県');
+      }
+    })
+    .catch(e => console.warn('Delivery days fetch failed:', e));
+}
+
+// 都道府県/受取方法 変更時の最短日チェック
+function checkPrefectureDeliveryConstraint_() {
+  const recv = $('receiveMethod').value || '';
+  const isShipping = recv.indexOf('郵送') >= 0;
+  const pref = $('prefecture').value || '';
+  if (!isShipping || !pref || !DELIVERY_DAYS_MAP[pref]) {
+    SHIPPING_EXTRA_DAYS = 0;
+    return;
+  }
+  const days = DELIVERY_DAYS_MAP[pref];
+  SHIPPING_EXTRA_DAYS = Math.max(0, days - 1); // 1日配送なら追加なし、2日配送なら+1
+  // 既存予約の開始日チェック
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const minBookable = new Date(today); minBookable.setDate(minBookable.getDate() + MIN_BOOK_OFFSET_DAYS());
+  const violated = BOOKINGS.filter(b => {
+    const startDates = [b.startDate, b.shootDate, b.eventDate].filter(Boolean);
+    return startDates.some(d => {
+      const dt = new Date(d + 'T00:00:00');
+      return dt < minBookable;
+    });
+  });
+  if (violated.length > 0) {
+    const warningEl = $('err2') || $('err1');
+    if (warningEl) {
+      warningEl.textContent = `⚠️ ${pref}へのお届けは${days}日かかるため、ご利用開始日は ${formatDateLocal(minBookable)} 以降をお選びください。ステップ①に戻って日付を調整してください。`;
+      warningEl.classList.remove('hidden');
+    }
+  }
 }
 
 function initLiff() {
