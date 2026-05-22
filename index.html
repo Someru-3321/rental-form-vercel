@@ -1254,12 +1254,20 @@ function renderBookingsSummary() {
     return;
   }
   const rows = valid.map(b => renderBookingRow_(b, plan, true)).join('');
-  /* 2着同時レンタル -10%OFF 案内 (衣装2着以上で自動適用) */
-  const twoSetNote = valid.length >= 2
+  /* 2着同時レンタル -10%OFF 案内
+     条件: 衣装2着以上 AND 全衣装が同じ受取日 (= 同じレンタル期間)
+     ※ 異なる日付の予約は別契約として扱われ、割引対象外 */
+  const allSameDate = valid.length >= 2 && valid.every(b => b.startDate && b.startDate === valid[0].startDate);
+  const twoSetNote = allSameDate
     ? `<div style="margin-top: 8px; padding: 8px 10px; background: #fff4f7; border-left: 3px solid var(--pink-deep); border-radius: 4px; font-size: 12px; color: var(--pink-deep);">
-        <strong>🎀 2着同時レンタル -10%OFF</strong> が自動適用されます (衣装料金の合計から10%割引)
+        <strong>🎀 2着同時レンタル -10%OFF</strong> が自動適用されます (衣装料金の合計から10%割引)<br>
+        <span style="font-size: 11px; color: var(--gray);">※ 同じ受取日にレンタルの場合のみ適用</span>
       </div>`
-    : '';
+    : (valid.length >= 2
+      ? `<div style="margin-top: 8px; padding: 8px 10px; background: #fff7f0; border-left: 3px solid var(--gray); border-radius: 4px; font-size: 11px; color: var(--gray);">
+          ※ 異なる受取日のご予約は別契約として扱われます (2着同時 -10%OFF は<strong>同じ受取日でのご予約のみ</strong>適用)
+        </div>`
+      : '');
   box.innerHTML = `
     <div style="font-weight: 600; color: var(--pink-deep); margin-bottom: 6px;">予約内容 (${valid.length}件):</div>
     ${rows}
