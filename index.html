@@ -993,6 +993,19 @@ function renderCalendarSection_(booking, sectionElem, kind) {
   const nextDisabled = year > maxDate.getFullYear() || (year === maxDate.getFullYear() && month >= maxDate.getMonth());
   sectionElem.querySelector('[data-cal-prev]').disabled = prevDisabled;
   sectionElem.querySelector('[data-cal-next]').disabled = nextDisabled;
+
+  /* 他の衣装で日付選択済みなら同じ受取日に固定 (異日同時予約防止) */
+  let lockedStart = null, lockedEnd = null;
+  BOOKINGS.forEach(b => {
+    if (b.garment.id === booking.garment.id) return;
+    if (kind === 'shoot' && b.shootDate) lockedStart = b.shootDate;
+    else if (kind === 'event' && b.eventDate) lockedStart = b.eventDate;
+    else if (!kind && b.startDate) {
+      lockedStart = b.startDate;
+      if (b.endDate) lockedEnd = b.endDate;
+    }
+  });
+
   const statusByDate = {};
   cal.dayStatus.forEach(s => { statusByDate[s.date] = s.available; });
   const firstDay = new Date(year, month, 1);
@@ -1011,8 +1024,14 @@ function renderCalendarSection_(booking, sectionElem, kind) {
     const cell = document.createElement('div');
     cell.className = 'cal-day';
     cell.textContent = d;
+    /* 他の衣装で日付ロック中: ロック日以外は選択不可 (グレーアウト) */
+    /* 通常プランは startDate ロック (endDate は自動継承)、撮影&イベントは shoot/event 日ロック */
+    const isLocked = lockedStart && (ymd !== lockedStart) && (kind || !lockedEnd || ymd !== lockedEnd);
     if (date < minBookable || date > maxDate) {
       cell.classList.add('past');
+    } else if (isLocked) {
+      cell.classList.add('past');
+      cell.title = '他のお衣装と同じ受取日のみご予約可能です';
     } else if (statusByDate[ymd] === true) {
       cell.classList.add('ok');
       cell.addEventListener('click', e => {
@@ -1048,7 +1067,11 @@ function renderCalendarSection_(booking, sectionElem, kind) {
     grid_parent.insertBefore(statusEl, grid_parent.firstChild);
   }
   if (!kind) {
-    if (!booking.startDate) {
+    if (lockedStart && !booking.startDate) {
+      const lockedRange = lockedEnd ? `${fmtYmd_(lockedStart)} 〜 ${fmtYmd_(lockedEnd)}` : fmtYmd_(lockedStart);
+      statusEl.textContent = `🔒 他のお衣装と同じ受取日 (${lockedRange}) のみご予約可能`;
+      statusEl.style.background = '#fff0f0';
+    } else if (!booking.startDate) {
       statusEl.textContent = '📅 ご利用開始日をタップ';
       statusEl.style.background = '#fff5f8';
     } else if (!booking.endDate) {
@@ -1060,7 +1083,14 @@ function renderCalendarSection_(booking, sectionElem, kind) {
       statusEl.style.background = '#e8f5e9';
     }
   } else {
-    statusEl.style.display = 'none';
+    /* 撮影&イベントプラン: shoot/event kind */
+    if (lockedStart && !selectedDate) {
+      statusEl.style.display = '';
+      statusEl.textContent = `🔒 他のお衣装と同じ${kind === 'shoot' ? '撮影日' : 'イベント日'} (${fmtYmd_(lockedStart)}) のみご予約可能`;
+      statusEl.style.background = '#fff0f0';
+    } else {
+      statusEl.style.display = 'none';
+    }
   }
 }
 // 後方互換 (既存呼び出しがあれば)
