@@ -452,6 +452,20 @@
       line-height: 1.6;
     }
 
+    /* お振込の場合の Stripe (カード/コンビニ/PayPay) 代替ボタン */
+    .alt-pay {
+      max-width: 360px;
+      margin: 0 auto;
+      text-align: center;
+    }
+    .pay-btn.pay-btn-alt {
+      background: #fff;
+      color: var(--pink-deep);
+      border: 1.5px solid var(--pink);
+      padding: 12px 24px;
+      font-size: 13px;
+    }
+
     .hidden { display: none !important; }
   </style>
 </head>
@@ -623,6 +637,14 @@
             ※ 詳細はLINEにもお送りしております
           </p>
         </div>
+
+        <div class="alt-pay hidden" id="altPay">
+          <p style="font-size: 12px; color: var(--ink-light); margin: 18px 0 8px;">
+            ─── または ───<br>
+            <strong style="color: var(--ink); font-size: 13px;">クレジットカード / コンビニ決済 / PayPay</strong> をご希望の方
+          </p>
+          <a class="pay-btn pay-btn-alt" id="altPayBtn" href="#" target="_blank" rel="noopener">カード/コンビニ/PayPayで支払う</a>
+        </div>
       </div>
 
       <p style="margin-top: 24px; font-size: 12px;">
@@ -711,6 +733,50 @@
   }
 
   // ===== Booking summary load =====
+  /* mi-mi+ 銀行振込先 (consent.html 内に固定) */
+  const BANK_INFO_STATIC = {
+    bankName: 'GMOあおぞらネット銀行',
+    branch: '法人営業部',
+    accountType: '普通',
+    accountNumber: '2439067',
+    accountHolder: 'ｿﾒﾙ(ｶ ﾐｰﾐﾌﾟﾗｽ',
+    accountHolderFull: '染める株式会社 mi-mi plus',
+  };
+
+  /* 銀行振込先カード描画ヘルパー */
+  function renderBankCard_(bankInfo, amount, dueLabel, stripeUrl) {
+    const b = bankInfo || BANK_INFO_STATIC;
+    $('bankName').textContent = b.bankName || '';
+    $('bankBranch').textContent = b.branch || '';
+    $('bankType').textContent = b.accountType || '';
+    $('bankNumber').textContent = b.accountNumber || '';
+    $('bankHolder').textContent = (b.accountHolder || '') + (b.accountHolderFull ? '\n(' + b.accountHolderFull + ')' : '');
+    $('bankDue').textContent = dueLabel || '';
+    $('bankCard').classList.remove('hidden');
+    const copyBtn = $('bankCopyBtn');
+    copyBtn.onclick = () => {
+      const txt = [
+        b.bankName,
+        b.branch + ' / ' + b.accountType + ' / ' + b.accountNumber,
+        b.accountHolder,
+        '振込金額: ¥' + Number(amount || 0).toLocaleString(),
+        '振込期限: ' + (dueLabel || ''),
+      ].join('\n');
+      navigator.clipboard.writeText(txt).then(() => {
+        copyBtn.textContent = 'コピーしました ✓';
+        copyBtn.classList.add('copied');
+        setTimeout(() => {
+          copyBtn.textContent = '口座情報をコピー';
+          copyBtn.classList.remove('copied');
+        }, 2000);
+      }).catch(() => alert('コピーに失敗しました'));
+    };
+    if (stripeUrl) {
+      $('altPayBtn').href = stripeUrl;
+      $('altPay').classList.remove('hidden');
+    }
+  }
+
   async function loadBooking() {
     PAGE_ID = getQuery('pid');
     if (!PAGE_ID) {
@@ -722,6 +788,35 @@
       if (!d || !d.ok) throw new Error(d && d.message || 'データ取得失敗');
       const b = d.booking;
       LATEST_BOOKING = b;
+
+      /* 二重サイン防止: 既にご署名済みの場合は同意画面を隠して完了画面を表示 */
+      if (b.alreadySubmitted) {
+        $('mainView').classList.add('hidden');
+        $('doneView').classList.remove('hidden');
+        $('payAmount').textContent = '¥' + Number(b.amount || 0).toLocaleString();
+        const doneTitle = document.querySelector('.done-screen h2');
+        const doneDesc = document.querySelector('.done-screen p');
+        if (doneTitle) doneTitle.textContent = '既にご署名いただいています';
+        if (doneDesc) doneDesc.innerHTML = 'こちらの同意書は既にご提出いただいております。<br>お支払いのご案内をご確認ください。';
+        if (b.breakdown && b.breakdown.items && b.breakdown.items.length) {
+          const wrapper = document.createElement('div');
+          wrapper.innerHTML = renderBreakdown_(b.breakdown, b.amount);
+          $('payAmount').insertAdjacentElement('afterend', wrapper);
+        }
+        const isBankExisting = (b.paymentMethod === 'お振込');
+        const existingPay = b.existingPaymentUrl || '';
+        if (isBankExisting) {
+          $('payBtn').style.display = 'none';
+          $('payHint').textContent = 'お振込にてお支払いください';
+          renderBankCard_(null, b.amount, '同意書送信日から営業日3日以内', existingPay);
+        } else if (existingPay) {
+          $('payBtn').href = existingPay;
+        } else {
+          $('payBtn').style.display = 'none';
+        }
+        return;
+      }
+
       const baseRowsArr = [
         ['お名前', (b.customerName || '') + ' 様'],
         ['活動名', b.activityName || '-'],
@@ -886,32 +981,7 @@
       if (res.paymentMode === 'bank' && res.bankInfo) {
         $('payBtn').style.display = 'none';
         $('payHint').textContent = 'お振込にてお支払いください';
-        const b = res.bankInfo;
-        $('bankName').textContent = b.bankName || '';
-        $('bankBranch').textContent = b.branch || '';
-        $('bankType').textContent = b.accountType || '';
-        $('bankNumber').textContent = b.accountNumber || '';
-        $('bankHolder').textContent = (b.accountHolder || '') + (b.accountHolderFull ? '\n(' + b.accountHolderFull + ')' : '');
-        $('bankDue').textContent = res.bankDueLabel || '';
-        $('bankCard').classList.remove('hidden');
-        $('bankCopyBtn').addEventListener('click', () => {
-          const txt = [
-            b.bankName,
-            b.branch + ' / ' + b.accountType + ' / ' + b.accountNumber,
-            b.accountHolder,
-            '振込金額: ¥' + Number(res.amount || 0).toLocaleString(),
-            '振込期限: ' + (res.bankDueLabel || ''),
-          ].join('\n');
-          navigator.clipboard.writeText(txt).then(() => {
-            const btn = $('bankCopyBtn');
-            btn.textContent = 'コピーしました ✓';
-            btn.classList.add('copied');
-            setTimeout(() => {
-              btn.textContent = '口座情報をコピー';
-              btn.classList.remove('copied');
-            }, 2000);
-          }).catch(() => alert('コピーに失敗しました'));
-        });
+        renderBankCard_(res.bankInfo, res.amount, res.bankDueLabel, res.paymentUrl);
       } else if (res.paymentUrl) {
         $('payBtn').href = res.paymentUrl;
       } else {
