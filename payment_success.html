@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>mi-mi+ お支払い完了</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    :root {
+      --bg: #fcf8f5;
+      --card: #ffffff;
+      --ink: #3c3335;
+      --ink-light: #82767a;
+      --pink: #d0869f;
+      --pink-deep: #b4647e;
+      --pink-soft: #fae8ee;
+      --gold: #b48c5a;
+      --ok: #6a9c6a;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+      font-family: -apple-system, "Hiragino Sans", "Yu Gothic", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      margin: 0; padding: 0; line-height: 1.7;
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .wrap { max-width: 480px; margin: 0 auto; padding: 32px 20px 80px; }
+    .logo {
+      font-family: "Hiragino Mincho ProN", "Yu Mincho", serif;
+      font-size: 32px;
+      text-align: center;
+      letter-spacing: 2px;
+      color: var(--ink);
+    }
+    .deco {
+      width: 60px; height: 1px; background: var(--gold);
+      margin: 12px auto 24px;
+    }
+    .check-circle {
+      width: 96px; height: 96px;
+      background: var(--ok);
+      border-radius: 50%;
+      margin: 0 auto 24px;
+      display: flex; align-items: center; justify-content: center;
+      color: #fff;
+      font-size: 56px;
+      font-weight: 200;
+      animation: bounce 0.6s ease-out;
+    }
+    @keyframes bounce {
+      0% { transform: scale(0.3); opacity: 0; }
+      60% { transform: scale(1.1); opacity: 1; }
+      100% { transform: scale(1); }
+    }
+    h1 {
+      font-family: "Hiragino Mincho ProN", serif;
+      font-size: 24px;
+      text-align: center;
+      margin: 0 0 12px;
+      color: var(--ink);
+    }
+    .sub {
+      text-align: center;
+      color: var(--ink-light);
+      font-size: 13px;
+      margin: 0 0 32px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid #e8dfe2;
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .card h2 {
+      font-family: "Hiragino Mincho ProN", serif;
+      font-size: 15px;
+      color: var(--pink-deep);
+      margin: 0 0 10px;
+    }
+    .card p {
+      font-size: 13px;
+      color: var(--ink);
+      margin: 0 0 8px;
+      line-height: 1.7;
+    }
+    .card p:last-child { margin-bottom: 0; }
+    .info-row {
+      font-size: 12px;
+      color: var(--ink-light);
+      padding: 4px 0;
+    }
+    .info-row .label { display: inline-block; min-width: 80px; }
+    .btn {
+      display: block;
+      width: 100%;
+      background: var(--pink);
+      color: #fff;
+      border: none;
+      padding: 16px;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      cursor: pointer;
+      text-decoration: none;
+      text-align: center;
+      margin-top: 24px;
+    }
+    .btn:active { background: var(--pink-deep); }
+    .note {
+      font-size: 11px;
+      color: var(--ink-light);
+      text-align: center;
+      margin-top: 16px;
+      line-height: 1.7;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="logo">mi-mi +</div>
+    <div class="deco"></div>
+
+    <div class="check-circle">✓</div>
+    <h1>お支払いを受け付けました</h1>
+    <p class="sub">ご利用ありがとうございます🤍</p>
+
+    <div class="card">
+      <h2>次のご案内</h2>
+      <p>お支払いの確認が完了次第、<br>お衣装のご発送準備を進めさせていただきます。</p>
+      <p>発送完了後、LINE にて追跡番号をご連絡いたします。</p>
+    </div>
+
+    <div class="card">
+      <h2>領収書をご希望の方</h2>
+      <p>LINE トーク画面で「<strong>領収書ください</strong>」とご返信ください。<br>自動で領収書 PDF のリンクをお送りいたします。</p>
+      <p style="font-size: 11px; color: var(--ink-light); margin-top: 8px;">
+        ※ 染める株式会社は適格請求書 (インボイス) 発行事業者です<br>
+        　登録番号: T6011001142353
+      </p>
+    </div>
+
+    <a href="#" class="btn" id="btnClose" onclick="closeAndReturn(event)">LINE に戻る</a>
+
+    <p class="note">
+      お困りごとがございましたら<br>
+      リッチメニュー「お問い合わせ」よりご連絡ください
+    </p>
+  </div>
+
+<script>
+  const LIFF_ID = '2010141049-WRoWfjTf';
+
+  (async () => {
+    try {
+      await liff.init({ liffId: LIFF_ID });
+    } catch (e) {
+      console.warn('LIFF init error:', e);
+    }
+  })();
+
+  function closeAndReturn(e) {
+    e.preventDefault();
+    if (typeof liff !== 'undefined' && liff.closeWindow) {
+      liff.closeWindow();
+    } else {
+      window.close();
+      // フォールバック: LINE 公式アカウントトークに戻る
+      window.location.href = 'https://line.me/R/ti/p/@mi-mi_plus';
+    }
+  }
+</script>
+</body>
+</html>
