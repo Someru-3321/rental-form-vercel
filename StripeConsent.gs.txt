@@ -33,6 +33,51 @@
 const DELIVERY_DAYS_DS = '1bbf0338-a7bf-8128-88a5-000b20edbb2c';
 let _deliveryDaysCache = null;
 
+// =============================================================
+// ヤマト送料テーブル (Notion DB: 22ff0338-a7bf-80a2-a56c-000baaa6c363)
+// 地域別の100サイズ料金: 関東¥1,200/関西¥1,300/沖縄¥2,600 等
+// =============================================================
+const YAMATO_SHIPPING_DS = '22ff0338-a7bf-80a2-a56c-000baaa6c363';
+let _shippingFeeCache = null;
+
+function getShippingFeeMap_() {
+  if (_shippingFeeCache) return _shippingFeeCache;
+  const token = PropertiesService.getScriptProperties().getProperty('NOTION_TOKEN');
+  if (!token) return {};
+  const queryUrl = NOTION_API + '/data_sources/' + YAMATO_SHIPPING_DS + '/query';
+  const map = {};
+  let cursor = null;
+  do {
+    const body = { page_size: 100 };
+    if (cursor) body.start_cursor = cursor;
+    const res = UrlFetchApp.fetch(queryUrl, {
+      method: 'post',
+      headers: { 'Authorization': 'Bearer ' + token, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
+      payload: JSON.stringify(body),
+      muteHttpExceptions: true,
+    });
+    if (res.getResponseCode() !== 200) return {};
+    const data = JSON.parse(res.getContentText());
+    (data.results || []).forEach(p => {
+      const prefs = ((p.properties['都道府県'] && p.properties['都道府県'].multi_select) || []).map(x => x.name);
+      const fee = (p.properties['料金(100サイズ)'] && typeof p.properties['料金(100サイズ)'].number === 'number') ? p.properties['料金(100サイズ)'].number : 1500;
+      prefs.forEach(pref => {
+        map[pref] = fee;
+        if (pref === '沖縄') map['沖縄県'] = fee; // DB側「沖縄」/予約DB側「沖縄県」 normalize
+      });
+    });
+    cursor = data.has_more ? data.next_cursor : null;
+  } while (cursor);
+  _shippingFeeCache = map;
+  return map;
+}
+
+function getShippingFeeForPrefecture_(prefecture) {
+  if (!prefecture) return 1500;
+  const map = getShippingFeeMap_();
+  return map[prefecture] || 1500;
+}
+
 function getDeliveryDaysMap_() {
   if (_deliveryDaysCache) return _deliveryDaysCache;
   const token = PropertiesService.getScriptProperties().getProperty('NOTION_TOKEN');
@@ -203,10 +248,13 @@ function calculateBreakdown_(props) {
     items.push({ label: 'オプション: 飲食利用', amount: 6000, qty: 1 });
   }
 
-  // ④ 送料 (郵送お届け の場合のみ +¥1,500)
+  // ④ 送料 (郵送お届けの場合のみ、都道府県別ヤマト100サイズ料金)
   const recv = props['お受け取り方法'] && props['お受け取り方法'].select && props['お受け取り方法'].select.name;
   if (recv && recv.indexOf('郵送') >= 0) {
-    items.push({ label: '送料: 郵送お届け', amount: 1500, qty: 1 });
+    const pref = (props['都道府県'] && props['都道府県'].select && props['都道府県'].select.name) || '';
+    const shippingFee = getShippingFeeForPrefecture_(pref);
+    const shippingLabel = '送料: 郵送お届け' + (pref ? ' (' + pref + ')' : '');
+    items.push({ label: shippingLabel, amount: shippingFee, qty: 1 });
   }
 
   // 小計 (割引前)
@@ -321,16 +369,8 @@ function saveConsent_(payload) {
   const filename = 'consent_' + pageId.substring(0, 8) + '_' + Date.now() + '.png';
   const blob = Utilities.newBlob(bytes, 'image/png', filename);
 
-  let file;
-  const folderId = PropertiesService.getScriptProperties().getProperty('CONSENT_DRIVE_FOLDER_ID');
-  if (folderId) {
-    const folder = DriveApp.getFolderById(folderId);
-    file = folder.createFile(blob);
-  } else {
-    file = DriveApp.createFile(blob);
-  }
-  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  const fileUrl = 'https://drive.google.com/uc?id=' + file.getId();
+  /* DriveApp 権限取得が不安定なため Drive 保存をスキップ — 署名は base64 dataURL を Notion 同意書 提出IP rich_text に証跡として保存 */
+  const fileUrl = '(Drive保存スキップ)';
 
   // Notion ページ更新
   const token = PropertiesService.getScriptProperties().getProperty('NOTION_TOKEN');
