@@ -1264,8 +1264,9 @@ function renderBookingsSummary() {
         <span style="font-size: 11px; color: var(--gray);">※ 同じ受取日にレンタルの場合のみ適用</span>
       </div>`
     : (valid.length >= 2
-      ? `<div style="margin-top: 8px; padding: 8px 10px; background: #fff7f0; border-left: 3px solid var(--gray); border-radius: 4px; font-size: 11px; color: var(--gray);">
-          ※ 異なる受取日のご予約は別契約として扱われます (2着同時 -10%OFF は<strong>同じ受取日でのご予約のみ</strong>適用)
+      ? `<div style="margin-top: 8px; padding: 8px 10px; background: #fff0f0; border-left: 3px solid var(--ng); border-radius: 4px; font-size: 12px; color: var(--ng);">
+          <strong>⚠️ 異なる受取日の衣装は同時にご予約いただけません</strong><br>
+          <span style="font-size: 11px;">同じ受取日にレンタルする衣装のみ、まとめてお申込みください。<br>別の日のご予約は、本予約完了後にもう一度フォームからお申込みください。</span>
         </div>`
       : '');
   box.innerHTML = `
@@ -1497,6 +1498,27 @@ function validateBookingForm() {
     const partial = BOOKINGS.find(b => (b.shootDate || b.eventDate) && !(b.shootDate && b.eventDate));
     if (partial) {
       return partial.garment.name + ' の撮影日とイベント日 両方を選択してください';
+    }
+  }
+
+  /* 異なる受取日の衣装は同時予約不可 */
+  /* mi-mi+ の予約は「同じ受取日にレンタルする衣装のみ」まとめて申し込み可能 */
+  /* 別日のご予約はそれぞれ別途お申込み (= 1度フォームを送信 → 完了後にもう一度フォームから申込み) */
+  const validBookings = BOOKINGS.filter(b => bookingHasDates_(b, plan));
+  if (validBookings.length >= 2) {
+    if (isSet) {
+      const firstShoot = validBookings[0].shootDate;
+      const firstEvent = validBookings[0].eventDate;
+      const mismatched = validBookings.find(b => b.shootDate !== firstShoot || b.eventDate !== firstEvent);
+      if (mismatched) {
+        return '異なる撮影日/イベント日の衣装は同時にご予約いただけません。\n同じ受取日にレンタルする衣装のみ、まとめてお申込みください。\n別の日のご予約は、本予約完了後にもう一度フォームからお申込みください。';
+      }
+    } else {
+      const firstStart = validBookings[0].startDate;
+      const mismatched = validBookings.find(b => b.startDate !== firstStart);
+      if (mismatched) {
+        return '異なる受取日の衣装は同時にご予約いただけません。\n同じ受取日にレンタルする衣装のみ、まとめてお申込みください。\n別の日のご予約は、本予約完了後にもう一度フォームからお申込みください。';
+      }
     }
   }
   const isShipping = $('receiveMethod').value.indexOf('郵送') >= 0;
