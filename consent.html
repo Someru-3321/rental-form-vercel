@@ -434,11 +434,12 @@
           <li>返却予定日に発送 (または店舗持参) されない場合、当社は無断利用とみなし、別途損害賠償を請求することがあります。</li>
         </ol>
 
-        <h3>第3条 (お取扱い)</h3>
+        <h3>第3条 (お取扱い・ご利用目的)</h3>
         <ol>
-          <li>衣装はお客様ご自身が責任を持って取り扱うものとし、第三者への貸与・転売・譲渡は禁止します。</li>
+          <li><strong>お申込み時にご申告いただいた「ご利用目的」(撮影 / LIVE / コンカフェ等) 以外の用途で衣装を使用することを禁止します。</strong> 異なる用途で使用された場合、当社は契約違反として違約金 (商品定価相当額) のご請求、および以後の利用停止措置をとる場合があります。</li>
+          <li><strong>衣装の第三者への貸与・転売・譲渡を禁止します。</strong> 利用者ご本人以外が衣装を着用すること、SNS等を通じて他者に貸し出すことは固く禁じます。</li>
           <li>衣装の改造・加工・染色・洗濯は禁止します。汚れにお気付きの際は当社で適切に対応いたしますので、ご自身でのクリーニングはお控えください。</li>
-          <li>飲食を伴うご利用 (コンセプトカフェ・カフェイベント等) は、追加料金 ¥6,000 が必要です。お申込み時に該当する場合は必ずチェックしてください。</li>
+          <li>飲食を伴うご利用 (コンセプトカフェ・カフェイベント等) は、追加料金 ¥6,000 が必要です。お申込み時に該当する場合は必ずチェックしてください。撮影目的でレンタルされた衣装を、申告なくコンカフェ等の飲食を伴う店舗で使用することは契約違反となります。</li>
           <li>故意・過失による汚損・破損・紛失が発生した場合、修復費用または商品代金相当額をご請求します。</li>
         </ol>
 
@@ -641,12 +642,16 @@
       if (!d || !d.ok) throw new Error(d && d.message || 'データ取得失敗');
       const b = d.booking;
       LATEST_BOOKING = b;
-      const baseRows = [
+      const baseRowsArr = [
         ['お名前', (b.customerName || '') + ' 様'],
+        ['活動名', b.activityName || '-'],
+        ['所属・店舗', b.groupName || '-'],
         ['お衣装', b.garmentNames || '-'],
         ['ご利用期間', b.period || '-'],
         ['プラン', b.plan || '-'],
-      ].map(r => `<div class="row"><span class="label">${r[0]}</span><span class="val">${r[1]}</span></div>`).join('');
+        ['ご利用目的', b.useCase ? `<strong style="color: var(--pink-deep);">${escapeHtml_(b.useCase)}</strong>` : '<span style="color: var(--ng);">⚠️ 未入力</span>'],
+      ];
+      const baseRows = baseRowsArr.map(r => `<div class="row"><span class="label">${r[0]}</span><span class="val">${r[1]}</span></div>`).join('');
       $('bookingRows').innerHTML = baseRows + renderBreakdown_(b.breakdown, b.amount);
     } catch (e) {
       console.warn(e);

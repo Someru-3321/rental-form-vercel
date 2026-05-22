@@ -360,7 +360,9 @@
 
       <div class="help" style="margin-top: 12px;">
         ※ 予約日の前1日・後2日はお手入れ・出荷準備のためお取りできません<br>
-        ※ 月曜日は対面受取は不可、郵送のみとなります
+        ※ 月曜日は対面受取は不可、郵送のみとなります<br>
+        ※ ご利用開始日は <strong>明後日以降</strong> でお選びください<br>
+        ※ 郵送ご希望で遠方の方は、お届け先地域により <strong>+1〜2日</strong> 余裕を持ってご予約ください
       </div>
 
       <div id="bookingsSummary" class="selected-box hidden" style="margin-top: 16px;"></div>
@@ -532,6 +534,13 @@ let LINE_DISPLAY_NAME = '';   // 同上
 let IS_IN_LINE = false;       // LINE内ブラウザで開かれているか
 let LAST_PAYLOAD = null;      // 送信成功時 liff.sendMessages 用
 const MAX_FUTURE_DAYS = 60;
+// ご利用開始日の最短: 今日+2日 (明後日以降)。
+// 郵送 + 遠方の場合は更に都道府県別お届け日数を加算 (動的に SHIPPING_EXTRA_DAYS に設定)
+const MIN_BOOK_OFFSET_DAYS_BASE = 2;
+let SHIPPING_EXTRA_DAYS = 0;
+function MIN_BOOK_OFFSET_DAYS() {
+  return MIN_BOOK_OFFSET_DAYS_BASE + SHIPPING_EXTRA_DAYS;
+}
 
 const $ = id => document.getElementById(id);
 
@@ -930,6 +939,8 @@ function renderCalendarSection_(booking, sectionElem, kind) {
   sectionElem.querySelector('.cal-title').textContent = `${year}年${month + 1}月`;
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const maxDate = new Date(today); maxDate.setDate(maxDate.getDate() + MAX_FUTURE_DAYS - 1);
+  // 最短予約日 = 明後日 (today + 2)。お届けが郵送かつ遠方の場合は更に+delivery_days
+  const minBookable = new Date(today); minBookable.setDate(minBookable.getDate() + MIN_BOOK_OFFSET_DAYS());
   const prevDisabled = year < today.getFullYear() || (year === today.getFullYear() && month <= today.getMonth());
   const nextDisabled = year > maxDate.getFullYear() || (year === maxDate.getFullYear() && month >= maxDate.getMonth());
   sectionElem.querySelector('[data-cal-prev]').disabled = prevDisabled;
@@ -952,7 +963,7 @@ function renderCalendarSection_(booking, sectionElem, kind) {
     const cell = document.createElement('div');
     cell.className = 'cal-day';
     cell.textContent = d;
-    if (date < today || date > maxDate) {
+    if (date < minBookable || date > maxDate) {
       cell.classList.add('past');
     } else if (statusByDate[ymd] === true) {
       cell.classList.add('ok');

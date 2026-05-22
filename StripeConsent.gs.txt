@@ -57,6 +57,11 @@ function getBookingForConsent_(payload) {
 
   const email = (props['【契約者】メールアドレス'] && props['【契約者】メールアドレス'].email) || '';
 
+  // 利用目的 (使用用途) + 活動名 + 所属グループ — 同意書で明示
+  const useCase = ((props['使用用途'] && props['使用用途'].rich_text) || []).map(r => r.plain_text || '').join('').trim();
+  const activityName = ((props['活動名'] && props['活動名'].rich_text) || []).map(r => r.plain_text || '').join('').trim();
+  const groupName = ((props['所属グループ'] && props['所属グループ'].rich_text) || []).map(r => r.plain_text || '').join('').trim();
+
   // 明細計算 (衣装/プラン/オプション/送料/割引/税)
   const breakdown = calculateBreakdown_(props);
 
@@ -70,6 +75,9 @@ function getBookingForConsent_(payload) {
       amount: amountStored || breakdown.total,
       email: email,
       breakdown: breakdown,
+      useCase: useCase,
+      activityName: activityName,
+      groupName: groupName,
     },
   };
 }
@@ -761,9 +769,12 @@ function notifyConsentSubmitted_(payload, booking, signatureUrl, paymentUrl) {
     ':white_check_mark: *同意書 ご提出* (mi-mi+ レンタル)',
     '',
     'お客様: ' + (booking.customerName || '') + ' 様',
+    '活動名: ' + (booking.activityName || '-'),
+    '所属: ' + (booking.groupName || '-'),
     'お衣装: ' + (booking.garmentNames || '-'),
     '期間: ' + (booking.period || '-'),
     'プラン: ' + (booking.plan || '-'),
+    'ご利用目的: ' + (booking.useCase || '-'),
     '',
     '*ご請求 内訳:*',
   ].concat(breakdownLines).concat([
@@ -781,4 +792,177 @@ function notifyConsentSubmitted_(payload, booking, signatureUrl, paymentUrl) {
   } catch (e) {
     console.warn('Slack notify error:', e);
   }
+}
+
+
+// =============================================================
+// 返送管理: 返送予定日に LINE 通知 + 「返送しました」ボタン postback
+// 毎日 9:00 JST にトリガー (Apps Script Triggers で設定)
+// =============================================================
+function dailyReturnReminder() {
+  const token = PropertiesService.getScriptProperties().getProperty('NOTION_TOKEN');
+  if (!token) { console.warn('NOTION_TOKEN 未設定'); return; }
+
+  // 今日の日付 (YYYY-MM-DD JST)
+  const tz = 'Asia/Tokyo';
+  const now = new Date();
+  const today = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+
+  // Notion query: レンタル日.end == today かつ ステータスが「受渡済」「郵送対応済」のもの
+  const queryBody = {
+    filter: {
+      and: [
+        { property: 'レンタル日', date: { equals: today } },
+        {
+          or: [
+            { property: 'ステータス', status: { equals: '受渡済' } },
+            { property: 'ステータス', status: { equals: '郵送対応済' } },
+          ],
+        },
+      ],
+    },
+    page_size: 50,
+  };
+  const queryRes = UrlFetchApp.fetch(NOTION_API + '/data_sources/' + RESERVATION_DS + '/query', {
+    method: 'post',
+    headers: { 'Authorization': 'Bearer ' + token, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
+    payload: JSON.stringify(queryBody),
+    muteHttpExceptions: true,
+  });
+  if (queryRes.getResponseCode() !== 200) {
+    console.warn('Return reminder query error:', queryRes.getContentText().substring(0, 300));
+    return;
+  }
+  const data = JSON.parse(queryRes.getContentText());
+  if (!data.results || !data.results.length) {
+    console.log('返送リマインド対象なし (' + today + ')');
+    return;
+  }
+
+  let sent = 0, skipped = 0;
+  data.results.forEach(page => {
+    const props = page.properties;
+    const lineUserId = ((props['LINE User ID'] && props['LINE User ID'].rich_text) || []).map(r => r.plain_text || '').join('').trim();
+    if (!lineUserId) { skipped++; return; }
+
+    const titleStr = ((props['ご予約名'] && props['ご予約名'].title) || []).map(t => t.plain_text || '').join('');
+    const customerName = titleStr.replace(/\s*\(.+\)$/, '').replace(/\s*様$/, '').trim();
+
+    const returnMethod = (props['返却方法'] && props['返却方法'].select && props['返却方法'].select.name) || '';
+    const isShipping = returnMethod.indexOf('郵送') >= 0;
+
+    const msgLines = [
+      customerName + ' 様、',
+      'mi-mi+ レンタルご利用ありがとうございました🤍',
+      '',
+      '本日は、お衣装の返送予定日となります。',
+    ];
+    if (isShipping) {
+      msgLines.push('');
+      msgLines.push('▼ 返送方法: 郵送返却');
+      msgLines.push('返送先: 〒164-0001 東京都中野区中野5-46-9 ABCハウス101 mi-mi アトリエ');
+      msgLines.push('');
+      msgLines.push('発送完了後、下のボタンよりご報告ください🙏');
+    } else {
+      msgLines.push('');
+      msgLines.push('▼ 返送方法: 対面返却 (中野駅北口徒歩5分 mi-mi アトリエ)');
+      msgLines.push('');
+      msgLines.push('返却が完了しましたら、下のボタンをタップしてください🙏');
+    }
+    const msg = msgLines.join('\n');
+    pushLineQuickReplyPostback_(lineUserId, msg, [
+      { label: '返送しました', postback: 'returned:' + page.id },
+    ]);
+    sent++;
+  });
+
+  console.log('返送リマインド送信: ' + sent + '件, スキップ (LINE未登録): ' + skipped + '件');
+
+  // Slack にもサマリ
+  const slackUrl = PropertiesService.getScriptProperties().getProperty('SLACK_WEBHOOK_URL');
+  if (slackUrl && data.results.length > 0) {
+    UrlFetchApp.fetch(slackUrl, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({
+        text: ':outbox_tray: *本日返送予定日のお客様* (' + data.results.length + '名) — LINE リマインド送信済',
+      }),
+      muteHttpExceptions: true,
+    });
+  }
+}
+
+// Quick Reply (postback button) で LINE Push
+function pushLineQuickReplyPostback_(lineUserId, text, buttons) {
+  const token = PropertiesService.getScriptProperties().getProperty('LINE_CHANNEL_ACCESS_TOKEN');
+  if (!token) { console.warn('LINE_CHANNEL_ACCESS_TOKEN 未設定'); return false; }
+
+  const items = (buttons || []).slice(0, 13).map(b => ({
+    type: 'action',
+    action: { type: 'postback', label: (b.label || '').substring(0, 20), data: b.postback, displayText: b.label },
+  }));
+
+  const message = {
+    type: 'text',
+    text: text,
+    quickReply: items.length ? { items: items } : undefined,
+  };
+  const res = UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { 'Authorization': 'Bearer ' + token },
+    payload: JSON.stringify({ to: lineUserId, messages: [message] }),
+    muteHttpExceptions: true,
+  });
+  return res.getResponseCode() === 200;
+}
+
+// =============================================================
+// 「返送しました」postback ハンドラ
+// handleLinePostback_() の switch に追加: case 'returned': return handleReturnedPostback_(userId, pageId);
+// =============================================================
+function handleReturnedPostback_(lineUserId, pageId) {
+  if (!pageId) return false;
+  const token = PropertiesService.getScriptProperties().getProperty('NOTION_TOKEN');
+  const updateUrl = NOTION_API + '/pages/' + encodeURIComponent(pageId);
+
+  // 返送方法を確認 (郵送 or 対面)
+  const page = notionGetPage_(pageId);
+  const returnMethod = page && page.properties['返却方法'] && page.properties['返却方法'].select && page.properties['返却方法'].select.name || '';
+  const customerName = page ? (((page.properties['ご予約名'] && page.properties['ご予約名'].title) || []).map(t => t.plain_text || '').join('').replace(/\s*\(.+\)$/, '').replace(/\s*様$/, '').trim()) : '';
+
+  // 郵送の場合: 「返送済」(発送完了、まだ未受領) → 担当者が受領後に「返却確認【済】」をON
+  // 対面の場合: 「返送済」のみ (対面はその場で受領するため担当者が同時に確認チェック想定)
+  UrlFetchApp.fetch(updateUrl, {
+    method: 'patch',
+    headers: { 'Authorization': 'Bearer ' + token, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
+    payload: JSON.stringify({
+      properties: {
+        'ステータス': { status: { name: '返送済' } },
+      },
+    }),
+    muteHttpExceptions: true,
+  });
+
+  // お客様にお礼
+  const thanksMsg = customerName + ' 様、\nご返送のご報告ありがとうございました🤍\n\n商品到着・状態確認後、改めてご連絡いたします。\nまたのご利用を心よりお待ちしております。';
+  pushLineMessageToUser_(lineUserId, thanksMsg);
+
+  // Slack 通知 (担当者に「受領待ち」を知らせる)
+  const slackUrl = PropertiesService.getScriptProperties().getProperty('SLACK_WEBHOOK_URL');
+  if (slackUrl) {
+    UrlFetchApp.fetch(slackUrl, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({
+        text: ':package: *返送完了報告* (mi-mi+)\n\n' +
+          'お客様: ' + customerName + ' 様\n' +
+          '返却方法: ' + returnMethod + '\n' +
+          'ステータス → 「返送済」\n\n' +
+          ':arrow_right: 商品到着後、Notion「返却確認【済】」にチェックを入れて受領完了としてください。',
+      }),
+      muteHttpExceptions: true,
+    });
+  }
+  return true;
 }
