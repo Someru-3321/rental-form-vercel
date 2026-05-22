@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>mi-mi+ ご利用同意書</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    :root {
+      --bg: #fcf8f5;
+      --card: #ffffff;
+      --ink: #3c3335;
+      --ink-light: #82767a;
+      --pink: #d0869f;
+      --pink-deep: #b4647e;
+      --pink-soft: #fae8ee;
+      --line-color: #e0d4d8;
+      --gold: #b48c5a;
+      --ng: #c75555;
+      --ok: #6a9c6a;
+      --gray-light: #e8dfe2;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+      font-family: -apple-system, "Hiragino Sans", "Yu Gothic", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      margin: 0;
+      padding: 0;
+      line-height: 1.6;
+      font-size: 14px;
+    }
+    .wrap {
+      max-width: 560px;
+      margin: 0 auto;
+      padding: 20px 16px 100px;
+    }
+    header {
+      text-align: center;
+      padding: 16px 0 20px;
+      border-bottom: 1px solid var(--line-color);
+      margin-bottom: 20px;
+    }
+    header .logo {
+      font-family: "Hiragino Mincho ProN", "Yu Mincho", serif;
+      font-size: 28px;
+      color: var(--ink);
+      letter-spacing: 2px;
+    }
+    header .deco {
+      width: 60px; height: 1px;
+      background: var(--gold);
+      margin: 10px auto;
+    }
+    header h1 {
+      font-family: "Hiragino Mincho ProN", "Yu Mincho", serif;
+      font-size: 20px;
+      color: var(--ink);
+      margin: 8px 0 4px;
+      letter-spacing: 1px;
+    }
+    header .sub {
+      font-size: 11px;
+      color: var(--ink-light);
+      letter-spacing: 3px;
+    }
+
+    .booking-summary {
+      background: var(--card);
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 16px;
+      border: 1px solid var(--line-color);
+    }
+    .booking-summary h2 {
+      font-size: 13px;
+      color: var(--pink-deep);
+      margin: 0 0 10px;
+      letter-spacing: 1px;
+      font-weight: 600;
+    }
+    .booking-summary .row {
+      display: flex;
+      gap: 8px;
+      font-size: 13px;
+      padding: 3px 0;
+    }
+    .booking-summary .row .label {
+      min-width: 80px;
+      color: var(--ink-light);
+    }
+    .booking-summary .row .val {
+      flex: 1;
+      color: var(--ink);
+    }
+
+    .consent-card {
+      background: var(--card);
+      border-radius: 12px;
+      padding: 0;
+      margin-bottom: 16px;
+      border: 1px solid var(--line-color);
+      overflow: hidden;
+    }
+    .consent-card .head {
+      padding: 12px 16px;
+      background: linear-gradient(135deg, #fff 0%, var(--pink-soft) 100%);
+      border-bottom: 1px solid var(--line-color);
+    }
+    .consent-card .head h2 {
+      font-family: "Hiragino Mincho ProN", serif;
+      font-size: 16px;
+      color: var(--ink);
+      margin: 0;
+    }
+    .consent-card .head .note {
+      font-size: 11px;
+      color: var(--ink-light);
+      margin-top: 4px;
+    }
+    .consent-body {
+      max-height: 380px;
+      overflow-y: auto;
+      padding: 16px;
+      font-size: 13px;
+      line-height: 1.8;
+      color: var(--ink);
+      -webkit-overflow-scrolling: touch;
+    }
+    .consent-body h3 {
+      font-family: "Hiragino Mincho ProN", serif;
+      font-size: 14px;
+      color: var(--pink-deep);
+      margin: 16px 0 6px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid var(--pink-soft);
+    }
+    .consent-body h3:first-child { margin-top: 0; }
+    .consent-body p { margin: 4px 0 8px; }
+    .consent-body ol, .consent-body ul {
+      padding-left: 1.5em;
+      margin: 4px 0 8px;
+    }
+    .consent-body li { margin: 3px 0; }
+    .consent-body .end-marker {
+      text-align: center;
+      padding: 14px 0 6px;
+      color: var(--pink-deep);
+      font-size: 12px;
+      letter-spacing: 1px;
+      font-weight: 600;
+    }
+    .scroll-hint {
+      padding: 8px 16px;
+      font-size: 11px;
+      color: var(--ng);
+      text-align: center;
+      background: #fef3f3;
+      border-top: 1px solid var(--line-color);
+      display: block;
+    }
+    .scroll-hint.done {
+      color: var(--ok);
+      background: #f0f7f0;
+    }
+
+    .checks {
+      margin-bottom: 16px;
+    }
+    .checks .check {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 12px 14px;
+      background: var(--card);
+      border: 1px solid var(--line-color);
+      border-radius: 10px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .checks .check.disabled {
+      opacity: 0.5;
+      pointer-events: none;
+      background: #f5f0f1;
+    }
+    .checks .check input[type="checkbox"] {
+      width: 18px; height: 18px;
+      margin-top: 2px;
+      accent-color: var(--pink);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .checks .check label {
+      flex: 1;
+      font-size: 13px;
+      color: var(--ink);
+      cursor: pointer;
+      line-height: 1.5;
+    }
+    .checks .check.checked {
+      border-color: var(--pink);
+      background: var(--pink-soft);
+    }
+
+    .sign-card {
+      background: var(--card);
+      border-radius: 12px;
+      padding: 16px;
+      border: 1px solid var(--line-color);
+      margin-bottom: 16px;
+    }
+    .sign-card h2 {
+      font-family: "Hiragino Mincho ProN", serif;
+      font-size: 15px;
+      color: var(--pink-deep);
+      margin: 0 0 4px;
+    }
+    .sign-card .note {
+      font-size: 11px;
+      color: var(--ink-light);
+      margin-bottom: 10px;
+    }
+    .sign-pad-wrap {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 2 / 1;
+      background: #fff;
+      border: 1px dashed var(--pink);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .sign-pad-wrap canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none;
+    }
+    .sign-pad-wrap.empty::before {
+      content: "ここに指でご署名ください";
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      color: var(--ink-light);
+      font-size: 13px;
+      pointer-events: none;
+    }
+    .sign-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .btn-clear {
+      background: transparent;
+      color: var(--ink-light);
+      border: 1px solid var(--line-color);
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .btn-clear:hover { background: #f5f0f1; }
+
+    .btn-submit {
+      width: 100%;
+      background: var(--pink);
+      color: #fff;
+      border: none;
+      padding: 16px;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      cursor: pointer;
+      margin-top: 10px;
+      transition: all 0.2s;
+    }
+    .btn-submit:disabled {
+      background: var(--gray-light);
+      color: var(--ink-light);
+      cursor: not-allowed;
+    }
+    .btn-submit:active:not(:disabled) {
+      background: var(--pink-deep);
+    }
+
+    .loading {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid #fff;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .err {
+      background: #fef3f3;
+      color: var(--ng);
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin: 10px 0;
+    }
+    .err.hidden { display: none; }
+
+    .done-screen {
+      text-align: center;
+      padding: 40px 20px;
+    }
+    .done-screen .icon {
+      font-size: 48px;
+      color: var(--ok);
+    }
+    .done-screen h2 {
+      font-family: "Hiragino Mincho ProN", serif;
+      font-size: 20px;
+      color: var(--ink);
+      margin: 16px 0 8px;
+    }
+    .done-screen p {
+      color: var(--ink-light);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    .done-screen .pay-card {
+      margin-top: 24px;
+      background: var(--card);
+      border: 1px solid var(--pink);
+      border-radius: 12px;
+      padding: 20px 16px;
+    }
+    .done-screen .pay-card h3 {
+      font-family: "Hiragino Mincho ProN", serif;
+      color: var(--pink-deep);
+      font-size: 16px;
+      margin: 0 0 8px;
+    }
+    .done-screen .pay-card .amount {
+      font-size: 28px;
+      font-weight: 600;
+      color: var(--ink);
+      margin: 10px 0;
+    }
+    .done-screen .pay-btn {
+      display: inline-block;
+      background: var(--pink);
+      color: #fff;
+      padding: 14px 28px;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      text-decoration: none;
+      letter-spacing: 1px;
+      margin-top: 6px;
+    }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="wrap" id="mainView">
+    <header>
+      <div class="logo">mi-mi +</div>
+      <div class="deco"></div>
+      <h1>ご利用同意書</h1>
+      <div class="sub">R E N T A L   A G R E E M E N T</div>
+    </header>
+
+    <div id="bookingSummary" class="booking-summary">
+      <h2>ご予約内容</h2>
+      <div id="bookingRows"><div class="row"><span class="val">読み込み中…</span></div></div>
+    </div>
+
+    <div class="consent-card">
+      <div class="head">
+        <h2>同意書本文</h2>
+        <div class="note">最後までスクロールしてご確認ください</div>
+      </div>
+      <div class="consent-body" id="consentBody">
+        <h3>第1条 (目的)</h3>
+        <p>本同意書は、株式会社染める (以下「当社」) が運営する mi-mi+ 衣装レンタルサービス (以下「本サービス」) のご利用にあたり、お客様 (以下「利用者」) と当社との間で取り交わすものです。</p>
+
+        <h3>第2条 (レンタル期間)</h3>
+        <ol>
+          <li>レンタル期間は、お申込み時に確定したプラン日数とします。</li>
+          <li>期間中の延滞があった場合、1日につき延滞料金 ¥9,000 を申し受けます。</li>
+          <li>返却予定日に発送 (または店舗持参) されない場合、当社は無断利用とみなし、別途損害賠償を請求することがあります。</li>
+        </ol>
+
+        <h3>第3条 (お取扱い)</h3>
+        <ol>
+          <li>衣装はお客様ご自身が責任を持って取り扱うものとし、他者への貸与・転売は禁止します。</li>
+          <li>飲食を伴うご利用 (コンセプトカフェ等) は、追加料金 ¥6,000 が必要です。お申込み時に該当する場合は必ずチェックしてください。</li>
+          <li>故意・過失による汚損・破損が発生した場合、修復費用または商品代金相当額をご請求します。</li>
+        </ol>
+
+        <h3>第4条 (お支払い)</h3>
+        <ol>
+          <li>お支払いは、本同意書ご署名後に当社よりご案内するクレジットカード決済リンクよりお手続きください。</li>
+          <li>お支払い完了をもって、ご予約確定 (本契約成立) とします。</li>
+          <li>お支払い期日は、ご予約確定日より営業日3日以内とします。</li>
+        </ol>
+
+        <h3>第5条 (キャンセル)</h3>
+        <ol>
+          <li>ご利用開始日の7日前まで: キャンセル料無料</li>
+          <li>ご利用開始日の3〜6日前: ご利用料金の50%</li>
+          <li>ご利用開始日の2日前〜当日: ご利用料金の100%</li>
+        </ol>
+
+        <h3>第6条 (損害賠償)</h3>
+        <p>第3条第3項に該当する破損・汚損が認められた場合、当社は実費 (クリーニング・修復・商品買い替えに要する費用) を利用者に請求できるものとします。</p>
+
+        <h3>第7条 (返却)</h3>
+        <ol>
+          <li>返却は同梱の伝票にて発送、または当社店舗 (中野駅北口徒歩5分) への持参とします。</li>
+          <li>返却時の衣装の状態を確認後、レンタル完了とします。</li>
+        </ol>
+
+        <h3>第8条 (個人情報の取り扱い)</h3>
+        <p>当社は、本サービスの提供にあたって取得した個人情報を、本契約の履行および当社からのお知らせ送付の目的に限定して使用します。第三者への提供は、法令に基づく場合を除き行いません。</p>
+
+        <h3>第9条 (協議)</h3>
+        <p>本同意書に定めのない事項、または本契約の解釈に疑義が生じた場合、利用者と当社が誠意をもって協議の上、解決するものとします。</p>
+
+        <h3>第10条 (準拠法)</h3>
+        <p>本契約は日本法に準拠し、本契約に関する一切の紛争は、当社所在地を管轄する裁判所を第一審の専属的合意管轄裁判所とします。</p>
+
+        <div class="end-marker">— 同意書ここまで —</div>
+      </div>
+      <div class="scroll-hint" id="scrollHint">⬇ 最後までスクロールしてください</div>
+    </div>
+
+    <div class="checks">
+      <label class="check disabled" id="check1Wrap">
+        <input type="checkbox" id="check1" disabled>
+        <span>上記の同意書内容をすべて読み、理解しました。</span>
+      </label>
+      <label class="check disabled" id="check2Wrap">
+        <input type="checkbox" id="check2" disabled>
+        <span>レンタルプラン・料金・キャンセルポリシーに同意します。</span>
+      </label>
+      <label class="check disabled" id="check3Wrap">
+        <input type="checkbox" id="check3" disabled>
+        <span>個人情報の取り扱いに同意します。</span>
+      </label>
+    </div>
+
+    <div class="sign-card">
+      <h2>ご署名</h2>
+      <div class="note">下記の枠内に、指で署名をお願いいたします</div>
+      <div class="sign-pad-wrap empty" id="signWrap">
+        <canvas id="signCanvas"></canvas>
+      </div>
+      <div class="sign-actions">
+        <button type="button" class="btn-clear" id="btnClear">やり直す</button>
+      </div>
+    </div>
+
+    <div id="err" class="err hidden"></div>
+    <button class="btn-submit" id="btnSubmit" disabled>同意して送信する</button>
+  </div>
+
+  <div class="wrap hidden" id="doneView">
+    <header>
+      <div class="logo">mi-mi +</div>
+      <div class="deco"></div>
+    </header>
+    <div class="done-screen">
+      <div class="icon">✓</div>
+      <h2>ご署名ありがとうございました</h2>
+      <p>同意書のご提出を承りました。<br>続いてお支払いのお手続きへお進みください。</p>
+
+      <div class="pay-card" id="payCard">
+        <h3>お支払い</h3>
+        <div class="amount" id="payAmount">読み込み中…</div>
+        <p style="font-size: 12px; color: var(--ink-light); margin: 10px 0;">クレジットカードでお支払いいただけます</p>
+        <a class="pay-btn" id="payBtn" href="#" target="_blank" rel="noopener">お支払いに進む</a>
+      </div>
+
+      <p style="margin-top: 24px; font-size: 12px;">
+        ご不明点はリッチメニュー<br>「お問い合わせ」よりお気軽にどうぞ
+      </p>
+    </div>
+  </div>
+
+<script>
+  // ===== Apps Script API endpoint =====
+  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxC7JXpttF6S9mIsQ8WhdkjxSYvOJ7XBW2k1ftip4KbcobcjBPC8yIsm3yyq0sElbSewg/exec';
+  const LIFF_ID = '2010141049-WRoWfjTf';
+
+  // ===== State =====
+  let LINE_USER_ID = '';
+  let LINE_DISPLAY_NAME = '';
+  let PAGE_ID = ''; // Notion page ID from URL ?pid=...
+  let SCROLLED_TO_END = false;
+  let SIGNATURE_HAS_INK = false;
+
+  // ===== Helpers =====
+  const $ = id => document.getElementById(id);
+  function apiCall(action, payload) {
+    return fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action, payload: payload || {} }),
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    }).then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(d => {
+      if (d && d.error) throw new Error(d.error);
+      return d;
+    });
+  }
+  function showErr(msg) {
+    const e = $('err');
+    e.textContent = msg;
+    e.classList.remove('hidden');
+  }
+  function clearErr() { $('err').classList.add('hidden'); }
+  function getQuery(name) {
+    return new URLSearchParams(location.search).get(name) || '';
+  }
+
+  // ===== LIFF init =====
+  async function initLiff() {
+    try {
+      await liff.init({ liffId: LIFF_ID });
+      if (liff.isLoggedIn()) {
+        const profile = await liff.getProfile();
+        LINE_USER_ID = profile.userId || '';
+        LINE_DISPLAY_NAME = profile.displayName || '';
+      } else {
+        // 外部ブラウザでアクセスされた場合
+        liff.login({ redirectUri: location.href });
+      }
+    } catch (e) {
+      console.warn('LIFF init error:', e);
+    }
+  }
+
+  // ===== Booking summary load =====
+  async function loadBooking() {
+    PAGE_ID = getQuery('pid');
+    if (!PAGE_ID) {
+      $('bookingRows').innerHTML = '<div class="row"><span class="val">⚠️ ご予約IDが見つかりません。LINEから再度お入りください。</span></div>';
+      return;
+    }
+    try {
+      const d = await apiCall('getBookingForConsent', { pageId: PAGE_ID, lineUserId: LINE_USER_ID });
+      if (!d || !d.ok) throw new Error(d && d.message || 'データ取得失敗');
+      const b = d.booking;
+      $('bookingRows').innerHTML = [
+        ['お名前', (b.customerName || '') + ' 様'],
+        ['お衣装', b.garmentNames || '-'],
+        ['ご利用期間', b.period || '-'],
+        ['プラン', b.plan || '-'],
+        ['ご請求金額', b.amount ? '¥' + Number(b.amount).toLocaleString() : '別途ご案内'],
+      ].map(r => `<div class="row"><span class="label">${r[0]}</span><span class="val">${r[1]}</span></div>`).join('');
+    } catch (e) {
+      console.warn(e);
+      $('bookingRows').innerHTML = '<div class="row"><span class="val">⚠️ ご予約情報の取得に失敗しました</span></div>';
+    }
+  }
+
+  // ===== Scroll detection =====
+  function setupScrollDetect() {
+    const body = $('consentBody');
+    body.addEventListener('scroll', () => {
+      const scrolledBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 4;
+      if (scrolledBottom && !SCROLLED_TO_END) {
+        SCROLLED_TO_END = true;
+        const hint = $('scrollHint');
+        hint.textContent = '✓ 最後までお読みいただきました';
+        hint.classList.add('done');
+        enableChecks();
+      }
+    });
+  }
+  function enableChecks() {
+    ['check1', 'check2', 'check3'].forEach(id => {
+      const cb = $(id);
+      cb.disabled = false;
+      const wrap = $(id + 'Wrap');
+      wrap.classList.remove('disabled');
+      cb.addEventListener('change', updateSubmitState);
+    });
+  }
+
+  // ===== Signature pad =====
+  function setupSignPad() {
+    const canvas = $('signCanvas');
+    const wrap = $('signWrap');
+    const ctx = canvas.getContext('2d');
+    let drawing = false;
+    let last = null;
+
+    function resize() {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      ctx.scale(dpr, dpr);
+      ctx.lineWidth = 2.2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = '#2c2424';
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    function getPos(evt) {
+      const rect = canvas.getBoundingClientRect();
+      let x, y;
+      if (evt.touches && evt.touches.length) {
+        x = evt.touches[0].clientX - rect.left;
+        y = evt.touches[0].clientY - rect.top;
+      } else {
+        x = evt.clientX - rect.left;
+        y = evt.clientY - rect.top;
+      }
+      return { x, y };
+    }
+    function start(evt) {
+      evt.preventDefault();
+      drawing = true;
+      last = getPos(evt);
+      wrap.classList.remove('empty');
+      SIGNATURE_HAS_INK = true;
+      updateSubmitState();
+    }
+    function move(evt) {
+      if (!drawing) return;
+      evt.preventDefault();
+      const p = getPos(evt);
+      ctx.beginPath();
+      ctx.moveTo(last.x, last.y);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      last = p;
+    }
+    function end(evt) {
+      drawing = false;
+    }
+
+    canvas.addEventListener('mousedown', start);
+    canvas.addEventListener('mousemove', move);
+    canvas.addEventListener('mouseup', end);
+    canvas.addEventListener('touchstart', start, { passive: false });
+    canvas.addEventListener('touchmove', move, { passive: false });
+    canvas.addEventListener('touchend', end);
+
+    $('btnClear').addEventListener('click', () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      wrap.classList.add('empty');
+      SIGNATURE_HAS_INK = false;
+      updateSubmitState();
+    });
+  }
+
+  // ===== Submit state =====
+  function updateSubmitState() {
+    const allChecked = ['check1', 'check2', 'check3'].every(id => $(id).checked);
+    const ready = SCROLLED_TO_END && allChecked && SIGNATURE_HAS_INK;
+    $('btnSubmit').disabled = !ready;
+  }
+
+  // ===== Submit =====
+  $('btnSubmit').addEventListener('click', async () => {
+    clearErr();
+    const btn = $('btnSubmit');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="loading"></span>送信中…';
+
+    const canvas = $('signCanvas');
+    const signatureDataUrl = canvas.toDataURL('image/png');
+
+    try {
+      const res = await apiCall('saveConsent', {
+        pageId: PAGE_ID,
+        lineUserId: LINE_USER_ID,
+        lineDisplayName: LINE_DISPLAY_NAME,
+        signatureDataUrl: signatureDataUrl,
+        agreedItems: ['check1', 'check2', 'check3'],
+        userAgent: navigator.userAgent,
+        submittedAt: new Date().toISOString(),
+      });
+      if (!res.ok) throw new Error(res.message || '送信に失敗しました');
+
+      // Show done view
+      $('mainView').classList.add('hidden');
+      $('doneView').classList.remove('hidden');
+      if (res.amount) {
+        $('payAmount').textContent = '¥' + Number(res.amount).toLocaleString();
+      } else {
+        $('payAmount').textContent = '別途ご案内';
+      }
+      if (res.paymentUrl) {
+        $('payBtn').href = res.paymentUrl;
+      } else {
+        $('payBtn').style.display = 'none';
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (e) {
+      showErr('送信エラー: ' + e.message);
+      btn.disabled = false;
+      btn.textContent = '同意して送信する';
+    }
+  });
+
+  // ===== Init =====
+  (async () => {
+    await initLiff();
+    setupScrollDetect();
+    setupSignPad();
+    await loadBooking();
+  })();
+</script>
+</body>
+</html>
