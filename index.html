@@ -437,6 +437,43 @@
         </details>
       </div>
 
+      <!-- 対面受取の時間入力 -->
+      <div id="faceToFaceFields" class="hidden" style="background:#fff5f8;padding:12px;border-radius:8px;margin-bottom:14px;border:1px dashed var(--pink);">
+        <div style="font-weight:600;color:var(--pink-deep);margin-bottom:6px;font-size:13px;">📍 対面受け渡し情報</div>
+        <div style="font-size:11px;color:var(--ink-light);line-height:1.6;margin-bottom:10px;">
+          📅 火曜〜日曜 11:00〜21:00 (月曜定休)<br>
+          ⏱️ 13:00〜14:00 は受け渡し不可<br>
+          🕐 30分単位でお選びください<br>
+          📍 mi-mi+ アトリエ (中野駅北口 徒歩5分)
+        </div>
+        <div class="row2">
+          <div>
+            <label class="req" for="faceToFacePickupTime">受取時間</label>
+            <select id="faceToFacePickupTime"></select>
+          </div>
+          <div>
+            <label class="req" for="faceToFaceReturnTime">返却時間</label>
+            <select id="faceToFaceReturnTime"></select>
+          </div>
+        </div>
+      </div>
+
+      <!-- 領収書 -->
+      <div class="checkrow">
+        <input type="checkbox" id="chkReceipt">
+        <label for="chkReceipt" style="margin: 0; font-weight: 400;">
+          領収書の発行を希望する<br>
+          <span style="font-size: 11px; color: var(--ink-light); line-height: 1.5;">
+            ※ チェックを入れた場合、お支払い完了後に領収書URLをLINEへお送りいたします<br>
+            ※ 宛名を別途指定したい場合は下記にご記入ください
+          </span>
+        </label>
+      </div>
+      <div id="receiptNameWrap" class="hidden" style="margin-top:-8px;margin-bottom:14px;">
+        <label for="receiptName" style="font-size:12px;color:var(--ink-light);">領収書宛名 (任意・空欄の場合はご契約者名)</label>
+        <input type="text" id="receiptName" placeholder="例: 株式会社○○ 様">
+      </div>
+
       <label class="req" for="paymentMethod">決済方法</label>
       <select id="paymentMethod"></select>
 
@@ -642,6 +679,7 @@ function init() {
   $('btnBack2').addEventListener('click', () => setStep(1));
   $('btnSubmit').addEventListener('click', onSubmit);
   $('receiveMethod').addEventListener('change', toggleShippingFields);
+  $('chkReceipt').addEventListener('change', toggleReceiptName_);
 
   // 郵便番号→住所自動入力
   attachZipAutoFill_('postal', 'address', 'prefecture');
@@ -1371,8 +1409,34 @@ function renderBookingSummary() {
 function toggleShippingFields() {
   const m = $('receiveMethod').value || '';
   const isShipping = m.indexOf('郵送') >= 0;
+  const isFaceToFace = m.indexOf('対面') >= 0;
   $('shippingFields').classList.toggle('hidden', !isShipping);
   $('shipFeeRow').classList.toggle('hidden', !isShipping);
+  $('faceToFaceFields').classList.toggle('hidden', !isFaceToFace);
+  if (isFaceToFace) populateFaceToFaceTimes_();
+}
+
+/* 対面受け渡し可能時間: 火-日 11:00-21:00, 13:00-14:00除外, 30分単位 */
+function populateFaceToFaceTimes_() {
+  const slots = [];
+  for (let h = 11; h <= 21; h++) {
+    for (const m of [0, 30]) {
+      if (h === 13) continue; /* 13:00, 13:30 不可 */
+      if (h === 21 && m === 30) continue; /* 21:00 まで (21:30は不可) */
+      slots.push(String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0'));
+    }
+  }
+  ['faceToFacePickupTime', 'faceToFaceReturnTime'].forEach(id => {
+    const sel = $(id);
+    if (sel.options.length > 0) return; /* 既に populate 済み */
+    sel.innerHTML = '<option value="">選択してください</option>' + slots.map(s => `<option value="${s}">${s}</option>`).join('');
+  });
+}
+
+/* 領収書チェック切替で宛名input表示 */
+function toggleReceiptName_() {
+  const checked = $('chkReceipt').checked;
+  $('receiptNameWrap').classList.toggle('hidden', !checked);
 }
 
 function onSubmit() {
@@ -1441,6 +1505,12 @@ function onSubmit() {
     note: $('note').value.trim(),
     agreementChecked: $('chkAgree').checked,
     shippingFeeAcknowledged: $('chkShipFee').checked,
+    /* 領収書 */
+    receiptRequired: $('chkReceipt').checked,
+    receiptName: $('receiptName').value.trim(),
+    /* 対面受け渡し (火-日 11:00-21:00, 13-14除外, 30分単位) */
+    faceToFacePickupTime: $('faceToFacePickupTime').value || '',
+    faceToFaceReturnTime: $('faceToFaceReturnTime').value || '',
     lineUserId: LINE_USER_ID,
     lineDisplayName: LINE_DISPLAY_NAME,
   };
@@ -1614,6 +1684,9 @@ function validateBookingForm() {
         if (b.startDate && isMonday(b.startDate)) return b.garment.name + ' が月曜開始です。対面受取は月曜お休みのため、郵送に変更いただくか別の日をお選びください';
       }
     }
+    /* 対面受取時間 (受取・返却) の必須チェック */
+    if (!$('faceToFacePickupTime').value) return '対面受取時間 (受取) をお選びください';
+    if (!$('faceToFaceReturnTime').value) return '対面受取時間 (返却) をお選びください';
   }
   if (!$('paymentMethod').value) return '決済方法をお選びください';
   // コンカフェ/コンセプトカフェ利用なら飲食利用必須

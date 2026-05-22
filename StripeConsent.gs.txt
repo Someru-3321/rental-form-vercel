@@ -784,17 +784,32 @@ function handleStripeWebhook_(rawBody, signature) {
     const pageRes = notionGetPage_(pageId);
     if (pageRes && pageRes.properties && pageRes.properties['LINE User ID']) {
       const lineUserId = (pageRes.properties['LINE User ID'].rich_text || []).map(r => r.plain_text || '').join('');
+      /* 領収書希望のお客様には自動で領収書URLを送信 */
+      const wantsReceipt = pageRes.properties['領収書希望'] && pageRes.properties['領収書希望'].checkbox;
       if (lineUserId) {
         const thanksMsg = [
           'お支払い完了のご確認をいたしました🤍',
           'ありがとうございました。',
           '',
           'お衣装のご発送の準備を進めさせていただきます。',
+        ].concat(wantsReceipt ? [
+          '',
+          '※ ご希望の領収書はこの後すぐにお送りいたします🤍',
+        ] : [
           '',
           '※ 領収書をご希望の方は、',
           '   「領収書ください」と本トークにご返信ください。',
-        ].join('\n');
+        ]).join('\n');
         pushLineMessageToUser_(lineUserId, thanksMsg);
+
+        /* 領収書希望者には requestInvoiceReceipt_ を呼んで receipt URL を自動送信 */
+        if (wantsReceipt) {
+          try {
+            requestInvoiceReceipt_({ pageId: pageId, lineUserId: lineUserId });
+          } catch (e) {
+            console.warn('自動領収書送信エラー:', e);
+          }
+        }
       }
     }
   }
