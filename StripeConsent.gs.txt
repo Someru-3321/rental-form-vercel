@@ -268,8 +268,9 @@ function calculateBreakdown_(props) {
 
   // ⑤ ディスカウント (2着同時 -10%, 手動 ¥2,000 / ¥3,000 オフ, etc.)
   const discounts = [];
-  if (garmentRefs.length >= 2 && opts.some(o => (o.name || '').indexOf('2着同時') >= 0)) {
-    // 衣装小計の10% (送料・オプション除く)
+  /* 2着同時レンタル割引 -10%OFF を強制適用 (衣装2着以上なら必ず) */
+  /* 「+追加オプション」のチェック有無を問わず適用 — オペレータの設定漏れ防止 */
+  if (garmentRefs.length >= 2) {
     const discount = Math.round(garmentBaseTotal * 0.1);
     discounts.push({ label: '2着同時レンタル割引 (-10%)', amount: -discount });
   }
@@ -1283,4 +1284,89 @@ function handleReturnedPostback_(lineUserId, pageId) {
     });
   }
   return true;
+}
+
+
+// =============================================================
+// テスト関数: 2着同時レンタル割引のロジック検証
+// editor で実行 → 実行ログ + Slack に結果出力
+// =============================================================
+function testTwoSetDiscount() {
+  const cases = [
+    {
+      name: '1着のみ → 割引なし',
+      garmentCount: 1,
+      hasTwoSetOption: false,
+      expectDiscount: false,
+    },
+    {
+      name: '2着 + +追加オプション設定あり → 10%OFF',
+      garmentCount: 2,
+      hasTwoSetOption: true,
+      expectDiscount: true,
+    },
+    {
+      name: '2着 + +追加オプション設定なし → それでも10%OFF (強制適用)',
+      garmentCount: 2,
+      hasTwoSetOption: false,
+      expectDiscount: true,
+    },
+    {
+      name: '3着 + +追加オプション設定なし → 10%OFF',
+      garmentCount: 3,
+      hasTwoSetOption: false,
+      expectDiscount: true,
+    },
+  ];
+
+  const results = [];
+  cases.forEach(c => {
+    /* mock props for calculateBreakdown_ */
+    const garmentRelation = [];
+    for (let i = 0; i < c.garmentCount; i++) {
+      garmentRelation.push({ id: 'dummy-' + i });
+    }
+    const opts = c.hasTwoSetOption ? [{ name: '2着同時レンタル -10%OFF' }] : [];
+    const props = {
+      'レンタルプラン': { select: { name: '通常プラン【2泊3日】' } },
+      'レンタル衣装(決定)': { relation: garmentRelation },
+      '予約情報 要約': { rich_text: [{ plain_text: '【衣装】テスト衣装' }] },
+      '+追加オプション': { multi_select: opts },
+      'お受け取り方法': { select: { name: '郵送お届け' } },
+      '都道府県': { select: { name: '東京都' } },
+    };
+    const bd = calculateBreakdown_(props);
+    const hasDiscount = (bd.discounts || []).some(d => (d.label || '').indexOf('2着同時') !== -1);
+    const pass = (hasDiscount === c.expectDiscount);
+    results.push({
+      name: c.name,
+      expected: c.expectDiscount ? '10%OFF適用' : '割引なし',
+      actual: hasDiscount ? '10%OFF適用' : '割引なし',
+      total: bd.total,
+      pass: pass,
+    });
+  });
+
+  const allPass = results.every(r => r.pass);
+  const lines = [
+    (allPass ? ':white_check_mark:' : ':x:') + ' *2着同時レンタル -10%OFF テスト*',
+    '',
+  ];
+  results.forEach(r => {
+    lines.push((r.pass ? '✓' : '✗') + ' ' + r.name);
+    lines.push('   期待: ' + r.expected + ' / 実際: ' + r.actual + ' / 合計: ¥' + Number(r.total).toLocaleString());
+  });
+  const msg = lines.join('\n');
+  console.log(msg);
+
+  const slackUrl = PropertiesService.getScriptProperties().getProperty('SLACK_WEBHOOK_URL');
+  if (slackUrl) {
+    UrlFetchApp.fetch(slackUrl, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({ text: msg }),
+      muteHttpExceptions: true,
+    });
+  }
+  return { allPass: allPass, results: results };
 }

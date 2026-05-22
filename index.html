@@ -1254,10 +1254,17 @@ function renderBookingsSummary() {
     return;
   }
   const rows = valid.map(b => renderBookingRow_(b, plan, true)).join('');
+  /* 2着同時レンタル -10%OFF 案内 (衣装2着以上で自動適用) */
+  const twoSetNote = valid.length >= 2
+    ? `<div style="margin-top: 8px; padding: 8px 10px; background: #fff4f7; border-left: 3px solid var(--pink-deep); border-radius: 4px; font-size: 12px; color: var(--pink-deep);">
+        <strong>🎀 2着同時レンタル -10%OFF</strong> が自動適用されます (衣装料金の合計から10%割引)
+      </div>`
+    : '';
   box.innerHTML = `
     <div style="font-weight: 600; color: var(--pink-deep); margin-bottom: 6px;">予約内容 (${valid.length}件):</div>
     ${rows}
     <div class="row" style="margin-top: 6px; font-size: 12px; color: var(--gray);">プラン: ${escapeHtml(plan)}</div>
+    ${twoSetNote}
   `;
   box.classList.remove('hidden');
   box.querySelectorAll('[data-rmid]').forEach(el => {
