@@ -435,6 +435,7 @@ function saveConsent_(payload) {
           '決済ID': paymentUrl ? { rich_text: [{ text: { content: sessionId } }] } : { rich_text: [] },
           '決済ステータス': { select: { name: '送付済' } },
           '請求金額': { number: booking.amount },
+          '支払 【送】': { checkbox: true },
         },
       }),
       muteHttpExceptions: true,
@@ -495,6 +496,7 @@ function saveConsent_(payload) {
             '決済ID': { rich_text: [{ text: { content: sessionId } }] },
             '決済ステータス': { select: { name: '送付済' } },
             '請求金額': { number: booking.amount },
+            '支払 【送】': { checkbox: true },
           },
         }),
         muteHttpExceptions: true,
@@ -921,13 +923,18 @@ function handleReceiptKeyword_(lineUserId, displayName) {
 // handleLinePostback_ の confirm:yes 分岐に追加
 // =============================================================
 function sendConsentUrlOnConfirm_(lineUserId, pageId) {
-  // ステータスを「契約ご送付待ち」に更新
+  /* ステータスを「契約ご送付待ち」に + 「同意【送】」を自動チェック */
   const token = PropertiesService.getScriptProperties().getProperty('NOTION_TOKEN');
   const updateUrl = NOTION_API + '/pages/' + encodeURIComponent(pageId);
   UrlFetchApp.fetch(updateUrl, {
     method: 'patch',
     headers: { 'Authorization': 'Bearer ' + token, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
-    payload: JSON.stringify({ properties: { 'ステータス': { status: { name: '契約ご送付待ち' } } } }),
+    payload: JSON.stringify({
+      properties: {
+        'ステータス': { status: { name: '契約ご送付待ち' } },
+        '同意【送】': { checkbox: true },
+      },
+    }),
     muteHttpExceptions: true,
   });
 
