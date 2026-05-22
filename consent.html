@@ -393,6 +393,65 @@
       margin-top: 6px;
     }
 
+    /* 銀行振込 案内カード */
+    .bank-card {
+      background: #fff;
+      border: 1px solid var(--line-color);
+      border-radius: 12px;
+      padding: 16px;
+      margin: 18px auto 0;
+      max-width: 360px;
+      text-align: left;
+    }
+    .bank-card h4 {
+      font-family: "Hiragino Mincho ProN", serif;
+      font-size: 14px;
+      color: var(--pink-deep);
+      margin: 0 0 10px;
+      text-align: center;
+    }
+    .bank-card table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .bank-card th, .bank-card td {
+      padding: 6px 4px;
+      border-bottom: 1px dashed var(--line-color);
+      vertical-align: top;
+    }
+    .bank-card th {
+      width: 90px;
+      text-align: left;
+      color: var(--ink-light);
+      font-weight: 400;
+    }
+    .bank-card td {
+      color: var(--ink);
+      font-weight: 600;
+    }
+    .bank-card .copy-btn {
+      display: block;
+      margin: 14px auto 0;
+      background: var(--pink-soft);
+      border: 1px solid var(--pink);
+      color: var(--pink-deep);
+      padding: 8px 18px;
+      border-radius: 8px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .bank-card .copy-btn.copied {
+      background: var(--pink);
+      color: #fff;
+    }
+    .bank-note {
+      font-size: 11px;
+      color: var(--ink-light);
+      margin-top: 10px;
+      line-height: 1.6;
+    }
+
     .hidden { display: none !important; }
   </style>
 </head>
@@ -445,7 +504,7 @@
 
         <h3>第4条 (お支払い)</h3>
         <ol>
-          <li>お支払いは、本同意書ご署名後に当社よりご案内する決済リンクよりお手続きください (クレジットカード / コンビニ決済 / PayPay からお選びいただけます)。</li>
+          <li>お支払いは、本同意書ご署名後に当社よりご案内する方法 (クレジットカード / コンビニ決済 / PayPay / 銀行振込) にてお手続きください。お選びいただく決済方法はご予約時にご指定いただいた方法を適用いたします。</li>
           <li>お支払い完了をもって、ご予約確定 (本契約成立) とします。</li>
           <li>お支払い期日は、決済リンク送付日より営業日3日以内とします。期日までにお支払いがない場合、ご予約は自動的にキャンセルとなる場合がございます。</li>
         </ol>
@@ -544,8 +603,26 @@
       <div class="pay-card" id="payCard">
         <h3>お支払い</h3>
         <div class="amount" id="payAmount">読み込み中…</div>
-        <p style="font-size: 12px; color: var(--ink-light); margin: 10px 0;">クレジットカードでお支払いいただけます</p>
+        <p style="font-size: 12px; color: var(--ink-light); margin: 10px 0;" id="payHint">クレジットカードでお支払いいただけます</p>
         <a class="pay-btn" id="payBtn" href="#" target="_blank" rel="noopener">お支払いに進む</a>
+
+        <div class="bank-card hidden" id="bankCard">
+          <h4>お振込先</h4>
+          <table>
+            <tr><th>銀行名</th><td id="bankName">-</td></tr>
+            <tr><th>支店</th><td id="bankBranch">-</td></tr>
+            <tr><th>種別</th><td id="bankType">-</td></tr>
+            <tr><th>口座番号</th><td id="bankNumber">-</td></tr>
+            <tr><th>名義</th><td id="bankHolder">-</td></tr>
+            <tr><th>振込期限</th><td id="bankDue">-</td></tr>
+          </table>
+          <button class="copy-btn" id="bankCopyBtn" type="button">口座情報をコピー</button>
+          <p class="bank-note">
+            ※ お振込人名は<strong>ご契約者様のお名前</strong>でお願いいたします<br>
+            ※ 振込手数料はお客様にてご負担をお願いいたします<br>
+            ※ 詳細はLINEにもお送りしております
+          </p>
+        </div>
       </div>
 
       <p style="margin-top: 24px; font-size: 12px;">
@@ -805,7 +882,37 @@
         wrapper.innerHTML = bdHtml;
         $amt.insertAdjacentElement('afterend', wrapper);
       }
-      if (res.paymentUrl) {
+      /* 決済方法による分岐: 銀行振込 (bank) / Stripe (stripe) */
+      if (res.paymentMode === 'bank' && res.bankInfo) {
+        $('payBtn').style.display = 'none';
+        $('payHint').textContent = 'お振込にてお支払いください';
+        const b = res.bankInfo;
+        $('bankName').textContent = b.bankName || '';
+        $('bankBranch').textContent = b.branch || '';
+        $('bankType').textContent = b.accountType || '';
+        $('bankNumber').textContent = b.accountNumber || '';
+        $('bankHolder').textContent = (b.accountHolder || '') + (b.accountHolderFull ? '\n(' + b.accountHolderFull + ')' : '');
+        $('bankDue').textContent = res.bankDueLabel || '';
+        $('bankCard').classList.remove('hidden');
+        $('bankCopyBtn').addEventListener('click', () => {
+          const txt = [
+            b.bankName,
+            b.branch + ' / ' + b.accountType + ' / ' + b.accountNumber,
+            b.accountHolder,
+            '振込金額: ¥' + Number(res.amount || 0).toLocaleString(),
+            '振込期限: ' + (res.bankDueLabel || ''),
+          ].join('\n');
+          navigator.clipboard.writeText(txt).then(() => {
+            const btn = $('bankCopyBtn');
+            btn.textContent = 'コピーしました ✓';
+            btn.classList.add('copied');
+            setTimeout(() => {
+              btn.textContent = '口座情報をコピー';
+              btn.classList.remove('copied');
+            }, 2000);
+          }).catch(() => alert('コピーに失敗しました'));
+        });
+      } else if (res.paymentUrl) {
         $('payBtn').href = res.paymentUrl;
       } else {
         $('payBtn').style.display = 'none';

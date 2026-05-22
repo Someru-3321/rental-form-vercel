@@ -147,6 +147,9 @@ function getBookingForConsent_(payload) {
   const activityName = ((props['活動名'] && props['活動名'].rich_text) || []).map(r => r.plain_text || '').join('').trim();
   const groupName = ((props['所属グループ'] && props['所属グループ'].rich_text) || []).map(r => r.plain_text || '').join('').trim();
 
+  /* 決済方法 — 予約時にお客様が選択 (お振込 / クレジットカード支払 / 現金支払 等) */
+  const paymentMethod = (props['決済方法'] && props['決済方法'].select && props['決済方法'].select.name) || '';
+
   // 明細計算 (衣装/プラン/オプション/送料/割引/税)
   const breakdown = calculateBreakdown_(props);
 
@@ -163,6 +166,7 @@ function getBookingForConsent_(payload) {
       useCase: useCase,
       activityName: activityName,
       groupName: groupName,
+      paymentMethod: paymentMethod,
     },
   };
 }
@@ -394,13 +398,63 @@ function saveConsent_(payload) {
     return { ok: false, message: 'Notion保存エラー' };
   }
 
-  // Stripe Checkout Session 発行 (クレカ + コンビニ + PayPay)
+  // Stripe Checkout Session 発行 (クレカ + コンビニ + PayPay) — 決済方法=お振込 のときは銀行振込フロー
   const bookingRes = getBookingForConsent_({ pageId: pageId });
   const booking = bookingRes.ok ? bookingRes.booking : {};
   let paymentUrl = '';
   let sessionId = '';
+  let paymentMode = 'stripe';
+  let bankInfo = null;
 
-  if (booking.amount && booking.amount > 0) {
+  const isBankTransfer = (booking.paymentMethod === 'お振込');
+
+  if (booking.amount && booking.amount > 0 && isBankTransfer) {
+    paymentMode = 'bank';
+    bankInfo = getBankTransferInfo_();
+    UrlFetchApp.fetch(updateUrl, {
+      method: 'patch',
+      headers: { 'Authorization': 'Bearer ' + token, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
+      payload: JSON.stringify({
+        properties: {
+          '決済ステータス': { select: { name: '送付済' } },
+          '請求金額': { number: booking.amount },
+        },
+      }),
+      muteHttpExceptions: true,
+    });
+
+    if (payload.lineUserId) {
+      const breakdownLines = buildBreakdownTextLines_(booking.breakdown);
+      const dueLabel = computeBankTransferDueLabel_();
+      const lineMsg = [
+        '同意書のご署名、誠にありがとうございました🤍',
+        '',
+        '続きまして、お振込のご案内です。',
+        '',
+        '【ご請求金額 内訳】',
+      ].concat(breakdownLines).concat([
+        '',
+        '【お振込先】',
+        '銀行名: ' + bankInfo.bankName,
+        '支店:   ' + bankInfo.branch,
+        '種別:   ' + bankInfo.accountType,
+        '口座番号: ' + bankInfo.accountNumber,
+        '名義:   ' + bankInfo.accountHolder,
+        '',
+        'お振込金額: ¥' + Number(booking.amount).toLocaleString(),
+        'お振込期限: ' + dueLabel,
+        '',
+        '※ お振込人名は「ご契約者様のお名前」でお願いいたします。',
+        '※ 振込手数料はお客様にてご負担をお願いいたします。',
+        '※ 上記金額には消費税(10%)が含まれます。',
+        '※ 領収書をご希望の方は、お振込確認後に',
+        '   「領収書ください」と本トークにご返信ください。',
+        '',
+        '入金確認後、ご発送の準備を進めます。',
+      ]).join('\n');
+      pushLineMessageToUser_(payload.lineUserId, lineMsg);
+    }
+  } else if (booking.amount && booking.amount > 0) {
     const sess = createStripeCheckoutSession_(pageId, booking);
     if (sess && sess.url) {
       paymentUrl = sess.url;
@@ -445,7 +499,7 @@ function saveConsent_(payload) {
     }
   }
 
-  notifyConsentSubmitted_(payload, booking, fileUrl, paymentUrl);
+  notifyConsentSubmitted_(payload, booking, fileUrl, paymentUrl, paymentMode);
 
   return {
     ok: true,
@@ -453,7 +507,38 @@ function saveConsent_(payload) {
     breakdown: booking.breakdown || null,
     paymentUrl: paymentUrl,
     sessionId: sessionId,
+    paymentMode: paymentMode,
+    bankInfo: bankInfo,
+    bankDueLabel: isBankTransfer ? computeBankTransferDueLabel_() : '',
   };
+}
+
+/* mi-mi+ 銀行振込先情報 */
+function getBankTransferInfo_() {
+  return {
+    bankName: 'GMOあおぞらネット銀行',
+    branch: '法人営業部',
+    accountType: '普通',
+    accountNumber: '2439067',
+    accountHolder: 'ｿﾒﾙ(ｶ ﾐｰﾐﾌﾟﾗｽ',
+    accountHolderFull: '染める株式会社 mi-mi plus',
+  };
+}
+
+/* 振込期限: 同意書送信日から営業日3日後 (mi-mi+ 既存ルール) */
+function computeBankTransferDueLabel_() {
+  const now = new Date();
+  let businessDays = 0;
+  const d = new Date(now);
+  while (businessDays < 3) {
+    d.setDate(d.getDate() + 1);
+    const dow = d.getDay();
+    if (dow !== 0 && dow !== 6) businessDays++;
+  }
+  const yyyy = d.getFullYear();
+  const mm = ('0' + (d.getMonth() + 1)).slice(-2);
+  const dd = ('0' + d.getDate()).slice(-2);
+  return yyyy + '/' + mm + '/' + dd + ' (営業日3日以内)';
 }
 
 
@@ -841,10 +926,14 @@ function sendConsentUrlOnConfirm_(lineUserId, pageId) {
 // =============================================================
 // Slack 通知: 同意書提出時
 // =============================================================
-function notifyConsentSubmitted_(payload, booking, signatureUrl, paymentUrl) {
+function notifyConsentSubmitted_(payload, booking, signatureUrl, paymentUrl, paymentMode) {
   const url = PropertiesService.getScriptProperties().getProperty('SLACK_WEBHOOK_URL');
   if (!url) return;
   const breakdownLines = booking.breakdown ? buildBreakdownTextLines_(booking.breakdown) : ['¥' + Number(booking.amount || 0).toLocaleString()];
+  const isBank = (paymentMode === 'bank');
+  const paymentLine = isBank
+    ? ':bank: *お振込み案内 LINE送信済* (' + computeBankTransferDueLabel_() + ' まで)'
+    : (paymentUrl ? ':credit_card: Stripe Checkout: ' + paymentUrl + ' (お客様にLINE送信済)' : ':warning: Stripe Checkout未発行');
   const text = [
     ':white_check_mark: *同意書 ご提出* (mi-mi+ レンタル)',
     '',
@@ -855,11 +944,12 @@ function notifyConsentSubmitted_(payload, booking, signatureUrl, paymentUrl) {
     '期間: ' + (booking.period || '-'),
     'プラン: ' + (booking.plan || '-'),
     'ご利用目的: ' + (booking.useCase || '-'),
+    '決済方法: ' + (booking.paymentMethod || '-'),
     '',
     '*ご請求 内訳:*',
   ].concat(breakdownLines).concat([
     '',
-    paymentUrl ? ':credit_card: Stripe Checkout: ' + paymentUrl + ' (お客様にLINE送信済)' : ':warning: Stripe Checkout未発行',
+    paymentLine,
     '署名画像: ' + signatureUrl,
   ]).join('\n');
   try {
