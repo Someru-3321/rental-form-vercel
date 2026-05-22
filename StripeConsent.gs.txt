@@ -1,0 +1,543 @@
+// ===== Stripe + 同意書 + 領収書 統合 (Code.gs 末尾に追加) =====
+//
+// handleApiAction_() の switch 文に以下4行追加:
+//   case 'getBookingForConsent':    return getBookingForConsent_(payload);
+//   case 'saveConsent':              return saveConsent_(payload);
+//   case 'getReceiptUrl':            return getReceiptUrl_(payload);
+//   case 'requestInvoiceReceipt':    return requestInvoiceReceipt_(payload);
+//
+// doPost(e) 内で Stripe Webhook を振り分け:
+//   if (e.parameter && e.parameter.webhook === 'stripe') {
+//     return ContentService.createTextOutput(JSON.stringify(
+//       handleStripeWebhook_(e.postData.contents, e.parameter.sig || '')
+//     )).setMimeType(ContentService.MimeType.JSON);
+//   }
+//
+// handleLinePostback_() / handleLineTextMessage_() に追加:
+//   - postback "confirm:yes:<pid>" → ステータス更新 + consent URL送信
+//   - text に「領収書」含む → handleReceiptKeyword_(userId)
+//
+// ScriptProperties に以下を設定:
+//   STRIPE_SECRET_KEY              = sk_test_... or sk_live_...
+//   STRIPE_WEBHOOK_SECRET          = whsec_... (Stripe Webhook 設定後に取得)
+//   CONSENT_FORM_URL               = https://rental-form-vercel.vercel.app/consent.html
+//   CONSENT_DRIVE_FOLDER_ID        = (任意) 署名画像保存先フォルダID
+//   INVOICE_REGISTRATION_NUMBER    = T6011001142353
+//   COMPANY_NAME                   = 染める株式会社
+
+
+// =============================================================
+// 同意書ページ用: Notion 予約情報を取得して返す
+// =============================================================
+function getBookingForConsent_(payload) {
+  const pageId = String(payload.pageId || '').trim();
+  if (!pageId) return { ok: false, message: 'pageId 未指定' };
+
+  const page = notionGetPage_(pageId);
+  if (!page) return { ok: false, message: 'ご予約が見つかりません' };
+
+  const props = page.properties || {};
+  const titleTexts = (props['ご予約名'] && props['ご予約名'].title) || [];
+  const titleStr = titleTexts.map(t => t.plain_text || '').join('');
+  const customerName = titleStr.replace(/\s*\(.+\)$/, '').replace(/\s*様$/, '').trim();
+
+  const datesRel = props['レンタル日'] && props['レンタル日'].date;
+  const period = datesRel ? (
+    datesRel.start.replace(/-/g, '/') + (datesRel.end ? ' 〜 ' + datesRel.end.replace(/-/g, '/') : '')
+  ) : '';
+  const plan = (props['レンタルプラン'] && props['レンタルプラン'].select ? props['レンタルプラン'].select.name : '') || '';
+  const amountStored = props['請求金額'] && typeof props['請求金額'].number === 'number' ? props['請求金額'].number : null;
+
+  let garmentNames = '';
+  if (props['予約情報 要約'] && props['予約情報 要約'].rich_text) {
+    const sum = props['予約情報 要約'].rich_text.map(r => r.plain_text || '').join('');
+    const m = sum.match(/【衣装】([^\n]+)/);
+    if (m) garmentNames = m[1].trim();
+  }
+
+  const email = (props['【契約者】メールアドレス'] && props['【契約者】メールアドレス'].email) || '';
+
+  return {
+    ok: true,
+    booking: {
+      customerName: customerName,
+      garmentNames: garmentNames,
+      period: period,
+      plan: plan,
+      amount: amountStored || calculateAmount_(plan, props),
+      email: email,
+    },
+  };
+}
+
+function notionGetPage_(pageId) {
+  const token = PropertiesService.getScriptProperties().getProperty('NOTION_TOKEN');
+  if (!token) throw new Error('NOTION_TOKEN 未設定');
+  const url = NOTION_API + '/pages/' + encodeURIComponent(pageId);
+  const res = UrlFetchApp.fetch(url, {
+    method: 'get',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Notion-Version': NOTION_VERSION,
+    },
+    muteHttpExceptions: true,
+  });
+  if (res.getResponseCode() !== 200) {
+    console.warn('Notion get page error:', res.getContentText().substring(0, 200));
+    return null;
+  }
+  return JSON.parse(res.getContentText());
+}
+
+function calculateAmount_(plan, props) {
+  if (!plan) return 0;
+  let base = 0;
+  if (plan.indexOf('2泊3日') >= 0) base = 17000;
+  else if (plan.indexOf('3泊4日') >= 0) base = 23000;
+  else if (plan.indexOf('4泊5日') >= 0) base = 29000;
+  else if (plan.indexOf('5泊6日') >= 0) base = 27000;
+  else if (plan.indexOf('撮影&イベント') >= 0) base = 24000;
+  if (plan.indexOf('飲食利用') >= 0) base += 6000;
+  const recv = props['お受け取り方法'] && props['お受け取り方法'].select && props['お受け取り方法'].select.name;
+  if (recv && recv.indexOf('郵送') >= 0) base += 1500;
+  return base;
+}
+
+
+// =============================================================
+// 同意書 受信 → 署名Drive保存 → Notion更新 → Stripe Checkout発行
+// =============================================================
+function saveConsent_(payload) {
+  const pageId = String(payload.pageId || '').trim();
+  if (!pageId) return { ok: false, message: 'pageId 未指定' };
+  const dataUrl = payload.signatureDataUrl || '';
+  if (dataUrl.indexOf('data:image/png;base64,') !== 0) {
+    return { ok: false, message: '署名画像が不正です' };
+  }
+
+  // 署名画像をDriveに保存
+  const base64 = dataUrl.substring('data:image/png;base64,'.length);
+  const bytes = Utilities.base64Decode(base64);
+  const filename = 'consent_' + pageId.substring(0, 8) + '_' + Date.now() + '.png';
+  const blob = Utilities.newBlob(bytes, 'image/png', filename);
+
+  let file;
+  const folderId = PropertiesService.getScriptProperties().getProperty('CONSENT_DRIVE_FOLDER_ID');
+  if (folderId) {
+    const folder = DriveApp.getFolderById(folderId);
+    file = folder.createFile(blob);
+  } else {
+    file = DriveApp.createFile(blob);
+  }
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  const fileUrl = 'https://drive.google.com/uc?id=' + file.getId();
+
+  // Notion ページ更新
+  const token = PropertiesService.getScriptProperties().getProperty('NOTION_TOKEN');
+  const submittedAt = payload.submittedAt || new Date().toISOString();
+  const props = {
+    '同意書 提出日時': { date: { start: submittedAt } },
+    '同意書 署名画像': { files: [{ name: filename, external: { url: fileUrl } }] },
+    '同意書 提出IP': { rich_text: [{ text: { content: payload.clientIp || '(不明)' } }] },
+    '同意 【済】': { checkbox: true },
+    'ステータス': { status: { name: '契約済 郵送待ち' } },
+  };
+  const updateUrl = NOTION_API + '/pages/' + encodeURIComponent(pageId);
+  const upRes = UrlFetchApp.fetch(updateUrl, {
+    method: 'patch',
+    headers: { 'Authorization': 'Bearer ' + token, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
+    payload: JSON.stringify({ properties: props }),
+    muteHttpExceptions: true,
+  });
+  if (upRes.getResponseCode() !== 200) {
+    console.warn('Notion update error:', upRes.getContentText().substring(0, 500));
+    return { ok: false, message: 'Notion保存エラー' };
+  }
+
+  // Stripe Checkout Session 発行 (クレカ + コンビニ + PayPay)
+  const bookingRes = getBookingForConsent_({ pageId: pageId });
+  const booking = bookingRes.ok ? bookingRes.booking : {};
+  let paymentUrl = '';
+  let sessionId = '';
+
+  if (booking.amount && booking.amount > 0) {
+    const sess = createStripeCheckoutSession_(pageId, booking);
+    if (sess && sess.url) {
+      paymentUrl = sess.url;
+      sessionId = sess.id || '';
+      UrlFetchApp.fetch(updateUrl, {
+        method: 'patch',
+        headers: { 'Authorization': 'Bearer ' + token, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
+        payload: JSON.stringify({
+          properties: {
+            '決済リンク': { url: paymentUrl },
+            '決済ID': { rich_text: [{ text: { content: sessionId } }] },
+            '決済ステータス': { select: { name: '送付済' } },
+            '請求金額': { number: booking.amount },
+          },
+        }),
+        muteHttpExceptions: true,
+      });
+
+      // LINEで決済URLをお客様に送信
+      if (payload.lineUserId) {
+        const lineMsg = [
+          '同意書のご署名、誠にありがとうございました🤍',
+          '',
+          '続きまして、お支払いのご案内です。',
+          '',
+          '【ご請求金額】¥' + Number(booking.amount).toLocaleString(),
+          '',
+          '下記リンクよりお支払いをお願いいたします:',
+          '▼ お支払い (クレカ / コンビニ / PayPay)',
+          paymentUrl,
+          '',
+          '※ 領収書をご希望の方は、お支払い後に',
+          '   「領収書ください」と本トークにご返信ください。',
+          '',
+          'お支払い完了次第、ご発送の準備を進めます。',
+        ].join('\n');
+        pushLineMessageToUser_(payload.lineUserId, lineMsg);
+      }
+    }
+  }
+
+  notifyConsentSubmitted_(payload, booking, fileUrl, paymentUrl);
+
+  return { ok: true, amount: booking.amount, paymentUrl: paymentUrl, sessionId: sessionId };
+}
+
+
+// =============================================================
+// Stripe Checkout Session 発行 (1URL で複数決済対応)
+// =============================================================
+function createStripeCheckoutSession_(pageId, booking) {
+  const secret = PropertiesService.getScriptProperties().getProperty('STRIPE_SECRET_KEY');
+  if (!secret) {
+    console.warn('STRIPE_SECRET_KEY 未設定: Checkout発行スキップ');
+    return null;
+  }
+  const amount = booking.amount;
+  if (!amount || amount <= 0) return null;
+
+  const productName = 'mi-mi+ レンタル料金 ' + (booking.customerName || '') + ' 様';
+  const description = [booking.garmentNames || '', booking.period || ''].filter(Boolean).join(' / ');
+
+  // form-encoded params (Stripe API は application/x-www-form-urlencoded)
+  const params = {
+    'mode': 'payment',
+    'payment_method_types[0]': 'card',
+    'payment_method_types[1]': 'konbini',
+    'payment_method_types[2]': 'paypay',
+    'line_items[0][price_data][currency]': 'jpy',
+    'line_items[0][price_data][product_data][name]': productName,
+    'line_items[0][price_data][product_data][description]': description,
+    'line_items[0][price_data][unit_amount]': String(amount),
+    'line_items[0][quantity]': '1',
+    'metadata[pageId]': pageId,
+    'metadata[customerName]': booking.customerName || '',
+    'metadata[period]': booking.period || '',
+    'success_url': 'https://rental-form-vercel.vercel.app/payment_success.html?pid=' + pageId,
+    'cancel_url': 'https://rental-form-vercel.vercel.app/consent.html?pid=' + pageId,
+    'locale': 'ja',
+    'payment_method_options[konbini][expires_after_days]': '3',
+  };
+  if (booking.email) {
+    params['customer_email'] = booking.email;
+  }
+  // 領収書自動メール送信は OFF (希望者のみ運用)
+  // params['payment_intent_data[receipt_email]'] = booking.email; // 全件発行する場合
+
+  const res = UrlFetchApp.fetch('https://api.stripe.com/v1/checkout/sessions', {
+    method: 'post',
+    headers: { 'Authorization': 'Bearer ' + secret },
+    payload: params,
+    muteHttpExceptions: true,
+  });
+  if (res.getResponseCode() !== 200) {
+    console.warn('Stripe checkout session error:', res.getContentText().substring(0, 500));
+    return null;
+  }
+  return JSON.parse(res.getContentText());
+}
+
+
+// =============================================================
+// Stripe Webhook 受信 (checkout.session.completed)
+// =============================================================
+function handleStripeWebhook_(rawBody, signature) {
+  const secret = PropertiesService.getScriptProperties().getProperty('STRIPE_WEBHOOK_SECRET');
+  // 署名検証 (任意ながら推奨)
+  if (secret && signature) {
+    const parts = {};
+    signature.split(',').forEach(p => {
+      const kv = p.split('=');
+      parts[kv[0]] = kv[1];
+    });
+    const ts = parts.t;
+    const expected = parts.v1;
+    if (ts && expected) {
+      const signedPayload = ts + '.' + rawBody;
+      const computed = Utilities.computeHmacSha256Signature(signedPayload, secret)
+        .map(b => ('0' + (b & 0xFF).toString(16)).slice(-2))
+        .join('');
+      if (computed !== expected) {
+        console.warn('Stripe signature mismatch');
+        return { ok: false };
+      }
+    }
+  }
+
+  const event = JSON.parse(rawBody);
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data && event.data.object;
+    const pageId = (session.metadata && session.metadata.pageId) || '';
+    if (!pageId) return { ok: true };
+
+    const amount = session.amount_total || 0;
+    const paymentMethodTypes = (session.payment_method_types || []).join(',');
+    let paymentMethodLabel = 'クレジットカード支払';
+    if (paymentMethodTypes.indexOf('konbini') >= 0) paymentMethodLabel = 'コンビニ決済';
+    else if (paymentMethodTypes.indexOf('paypay') >= 0) paymentMethodLabel = 'PayPay';
+
+    const token = PropertiesService.getScriptProperties().getProperty('NOTION_TOKEN');
+    const updateUrl = NOTION_API + '/pages/' + encodeURIComponent(pageId);
+    UrlFetchApp.fetch(updateUrl, {
+      method: 'patch',
+      headers: { 'Authorization': 'Bearer ' + token, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
+      payload: JSON.stringify({
+        properties: {
+          '支払【済】': { checkbox: true },
+          '決済ステータス': { select: { name: '支払済' } },
+          '入金日時': { date: { start: new Date().toISOString() } },
+          '決済ID': { rich_text: [{ text: { content: session.id || '' } }] },
+          // '決済方法' は select なので既存オプションのみ。「お振込/クレジットカード支払/現金支払」しかないので、Stripe決済はクレジットカード支払扱いに統一
+          '決済方法': { select: { name: 'クレジットカード支払' } },
+        },
+      }),
+      muteHttpExceptions: true,
+    });
+
+    // Slack 通知
+    const slackUrl = PropertiesService.getScriptProperties().getProperty('SLACK_WEBHOOK_URL');
+    if (slackUrl) {
+      const text = [
+        ':moneybag: *ご入金確認* (mi-mi+)',
+        '',
+        'お客様: ' + (session.metadata && session.metadata.customerName || '(不明)') + ' 様',
+        '金額: ¥' + Number(amount).toLocaleString(),
+        '決済方法: ' + paymentMethodLabel,
+        '',
+        'Notion ステータス → 「支払済」自動更新。発送準備をお願いします。',
+      ].join('\n');
+      UrlFetchApp.fetch(slackUrl, {
+        method: 'post',
+        contentType: 'application/json',
+        payload: JSON.stringify({ text: text }),
+        muteHttpExceptions: true,
+      });
+    }
+
+    // お客様にお礼+発送案内 LINE 送信
+    // session.metadata に lineUserId 入れてないので、Notion から取得が必要
+    const pageRes = notionGetPage_(pageId);
+    if (pageRes && pageRes.properties && pageRes.properties['LINE User ID']) {
+      const lineUserId = (pageRes.properties['LINE User ID'].rich_text || []).map(r => r.plain_text || '').join('');
+      if (lineUserId) {
+        const thanksMsg = [
+          'お支払い完了のご確認をいたしました🤍',
+          'ありがとうございました。',
+          '',
+          'お衣装のご発送の準備を進めさせていただきます。',
+          '',
+          '※ 領収書をご希望の方は、',
+          '   「領収書ください」と本トークにご返信ください。',
+        ].join('\n');
+        pushLineMessageToUser_(lineUserId, thanksMsg);
+      }
+    }
+  }
+
+  return { ok: true };
+}
+
+
+// =============================================================
+// 領収書希望キーワード対応 (LINE Bot)
+// handleLineTextMessage_ から呼び出し
+// =============================================================
+function handleReceiptKeyword_(lineUserId, displayName) {
+  // 最新の支払済予約を Notion で検索
+  const token = PropertiesService.getScriptProperties().getProperty('NOTION_TOKEN');
+  const queryUrl = NOTION_API + '/data_sources/' + RESERVATION_DS + '/query';
+  const queryBody = {
+    filter: {
+      and: [
+        { property: 'LINE User ID', rich_text: { equals: lineUserId } },
+        { property: '支払【済】', checkbox: { equals: true } },
+      ],
+    },
+    sorts: [{ property: '入金日時', direction: 'descending' }],
+    page_size: 1,
+  };
+  const queryRes = UrlFetchApp.fetch(queryUrl, {
+    method: 'post',
+    headers: { 'Authorization': 'Bearer ' + token, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
+    payload: JSON.stringify(queryBody),
+    muteHttpExceptions: true,
+  });
+  if (queryRes.getResponseCode() !== 200) {
+    console.warn('領収書希望: Notion query error:', queryRes.getContentText().substring(0, 300));
+    pushLineMessageToUser_(lineUserId, 'お支払い済みのご予約が見つかりませんでした。\nお手数ですが、ご予約名と日付をお教えいただけますでしょうか。');
+    return;
+  }
+  const data = JSON.parse(queryRes.getContentText());
+  if (!data.results || !data.results.length) {
+    pushLineMessageToUser_(lineUserId, 'お支払い済みのご予約が見つかりませんでした。\nお手数ですが、ご予約名と日付をお教えいただけますでしょうか。');
+    return;
+  }
+
+  const page = data.results[0];
+  const pageId = page.id;
+  const props = page.properties;
+  const titleStr = (props['ご予約名'].title || []).map(t => t.plain_text || '').join('');
+  const customerName = titleStr.replace(/\s*\(.+\)$/, '').replace(/\s*様$/, '').trim();
+  const stripeSessionId = (props['決済ID'].rich_text || []).map(r => r.plain_text || '').join('');
+  const amount = (props['請求金額'] && typeof props['請求金額'].number === 'number') ? props['請求金額'].number : 0;
+  const period = (props['レンタル日'].date && props['レンタル日'].date.start) || '';
+
+  // Stripe Checkout Session → PaymentIntent → Receipt URL を取得
+  const secret = PropertiesService.getScriptProperties().getProperty('STRIPE_SECRET_KEY');
+  let receiptUrl = '';
+  if (secret && stripeSessionId) {
+    const sessRes = UrlFetchApp.fetch('https://api.stripe.com/v1/checkout/sessions/' + stripeSessionId + '?expand[]=payment_intent.latest_charge', {
+      method: 'get',
+      headers: { 'Authorization': 'Bearer ' + secret },
+      muteHttpExceptions: true,
+    });
+    if (sessRes.getResponseCode() === 200) {
+      const sess = JSON.parse(sessRes.getContentText());
+      if (sess.payment_intent && sess.payment_intent.latest_charge && sess.payment_intent.latest_charge.receipt_url) {
+        receiptUrl = sess.payment_intent.latest_charge.receipt_url;
+      }
+    }
+  }
+
+  // Notion に「領収書希望」を立てる
+  const updateUrl = NOTION_API + '/pages/' + encodeURIComponent(pageId);
+  UrlFetchApp.fetch(updateUrl, {
+    method: 'patch',
+    headers: { 'Authorization': 'Bearer ' + token, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
+    payload: JSON.stringify({
+      properties: {
+        '領収書希望': { checkbox: true },
+        '領収書送付済': { checkbox: !!receiptUrl },
+      },
+    }),
+    muteHttpExceptions: true,
+  });
+
+  // お客様にLINEで領収書URLを送信
+  if (receiptUrl) {
+    const invoiceNo = PropertiesService.getScriptProperties().getProperty('INVOICE_REGISTRATION_NUMBER') || 'T6011001142353';
+    const msg = [
+      '領収書のご案内です🤍',
+      '',
+      '【ご予約】' + customerName + ' 様',
+      '【金額】¥' + Number(amount).toLocaleString(),
+      '',
+      '▼ 領収書PDF',
+      receiptUrl,
+      '',
+      '※ 染める株式会社の適格請求書 (インボイス) 対応',
+      '   登録番号: ' + invoiceNo,
+      '',
+      'もし宛名 (個人名/法人名) のご指定がございましたら',
+      'お教えください。',
+    ].join('\n');
+    pushLineMessageToUser_(lineUserId, msg);
+  } else {
+    // Stripe Receipt 取得できない場合 → Slack でスタッフに手動対応依頼
+    const slackUrl = PropertiesService.getScriptProperties().getProperty('SLACK_WEBHOOK_URL');
+    if (slackUrl) {
+      UrlFetchApp.fetch(slackUrl, {
+        method: 'post',
+        contentType: 'application/json',
+        payload: JSON.stringify({
+          text: ':receipt: *領収書ご希望* (Stripe領収書未発見、手動対応必要)\n\n' +
+            'お客様: ' + customerName + ' 様\n' +
+            'pageId: ' + pageId + '\n' +
+            'Stripe Session: ' + stripeSessionId + '\n' +
+            'LINE User ID: ' + lineUserId,
+        }),
+        muteHttpExceptions: true,
+      });
+    }
+    pushLineMessageToUser_(lineUserId, 'お問い合わせを承りました🙏\n領収書のご準備ができ次第、改めてご連絡いたします。');
+  }
+}
+
+
+// =============================================================
+// LINE Bot postback「はい (確認OK)」→ consent URL自動送信
+// handleLinePostback_ の confirm:yes 分岐に追加
+// =============================================================
+function sendConsentUrlOnConfirm_(lineUserId, pageId) {
+  // ステータスを「契約ご送付待ち」に更新
+  const token = PropertiesService.getScriptProperties().getProperty('NOTION_TOKEN');
+  const updateUrl = NOTION_API + '/pages/' + encodeURIComponent(pageId);
+  UrlFetchApp.fetch(updateUrl, {
+    method: 'patch',
+    headers: { 'Authorization': 'Bearer ' + token, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
+    payload: JSON.stringify({ properties: { 'ステータス': { status: { name: '契約ご送付待ち' } } } }),
+    muteHttpExceptions: true,
+  });
+
+  // consent URL を生成 + 送信
+  const consentBase = PropertiesService.getScriptProperties().getProperty('CONSENT_FORM_URL') || 'https://rental-form-vercel.vercel.app/consent.html';
+  const consentUrl = consentBase + '?pid=' + pageId;
+  const msg = [
+    'ありがとうございます🤍',
+    '',
+    'それでは続きまして、',
+    '同意書のご署名をお願いいたします。',
+    '',
+    '▼ 同意書ご署名ページ',
+    consentUrl,
+    '',
+    '上記より同意書をご確認・ご署名いただきましたら、',
+    'お支払いリンクをお送りいたします。',
+  ].join('\n');
+  pushLineMessageToUser_(lineUserId, msg);
+}
+
+
+// =============================================================
+// Slack 通知: 同意書提出時
+// =============================================================
+function notifyConsentSubmitted_(payload, booking, signatureUrl, paymentUrl) {
+  const url = PropertiesService.getScriptProperties().getProperty('SLACK_WEBHOOK_URL');
+  if (!url) return;
+  const text = [
+    ':white_check_mark: *同意書 ご提出* (mi-mi+ レンタル)',
+    '',
+    'お客様: ' + (booking.customerName || '') + ' 様',
+    'お衣装: ' + (booking.garmentNames || '-'),
+    '期間: ' + (booking.period || '-'),
+    'プラン: ' + (booking.plan || '-'),
+    '金額: ¥' + Number(booking.amount || 0).toLocaleString(),
+    '',
+    paymentUrl ? ':credit_card: Stripe Checkout: ' + paymentUrl + ' (お客様にLINE送信済)' : ':warning: Stripe Checkout未発行',
+    '署名画像: ' + signatureUrl,
+  ].join('\n');
+  try {
+    UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({ text: text }),
+      muteHttpExceptions: true,
+    });
+  } catch (e) {
+    console.warn('Slack notify error:', e);
+  }
+}
