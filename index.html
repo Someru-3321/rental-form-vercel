@@ -521,6 +521,41 @@ async function apiCall(action, payload) {
   return data;
 }
 
+/* localStorage キャッシュ (5分) — 衣装・設定データは頻繁に変わらないのでキャッシュで初期表示を高速化 */
+const CACHE_TTL_MS = 5 * 60 * 1000;
+function cachedApiCall_(action, payload) {
+  const key = 'mimi_cache_' + action;
+  try {
+    const cached = JSON.parse(localStorage.getItem(key) || 'null');
+    if (cached && (Date.now() - cached.t) < CACHE_TTL_MS) {
+      /* キャッシュヒット: バックグラウンドで最新版を再取得して上書き */
+      apiCall(action, payload).then(fresh => {
+        try { localStorage.setItem(key, JSON.stringify({ t: Date.now(), data: fresh })); } catch (e) {}
+      }).catch(() => {});
+      return Promise.resolve(cached.data);
+    }
+  } catch (e) {}
+  return apiCall(action, payload).then(fresh => {
+    try { localStorage.setItem(key, JSON.stringify({ t: Date.now(), data: fresh })); } catch (e) {}
+    return fresh;
+  });
+}
+
+/* lazy 画像読み込み (IntersectionObserver) — 画面に入ったサムネだけ読み込む */
+const lazyImageObserver_ = (typeof IntersectionObserver !== 'undefined') ? new IntersectionObserver((entries, obs) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      const el = entry.target;
+      const src = el.dataset.src;
+      if (src) {
+        el.style.backgroundImage = `url('${src}')`;
+        delete el.dataset.src;
+      }
+      obs.unobserve(el);
+    }
+  });
+}, { rootMargin: '200px' }) : { observe: (el) => { /* fallback: 即読み込み */ if (el.dataset.src) { el.style.backgroundImage = `url('${el.dataset.src}')`; } } };
+
 let CONFIG = null;
 let GARMENTS = [];
 let BOOKINGS = [];            // [{ garment, startDate, calendar?, viewMonth?, shootDate?, eventDate?, shootCalendar?, eventCalendar?, shootViewMonth?, eventViewMonth? }] — 通常プランは startDate/calendar、撮影&イベントプランは shoot/event 系を使用
@@ -565,13 +600,17 @@ function showError(elId, msg) {
 function hideError(elId) { $(elId).classList.add('hidden'); }
 
 function init() {
-  apiCall('getFormConfig')
+  /* 3つのAPI callを並列起動 (旧: getDeliveryDaysは onConfig 後直列依存) */
+  /* キャッシュ命中時は即時表示、バックグラウンドで最新取得して次回反映 */
+  cachedApiCall_('getFormConfig')
     .then(onConfig)
     .catch(e => showError('err1', '初期化エラー: ' + e.message));
 
-  apiCall('getGarments')
+  cachedApiCall_('getGarments')
     .then(onGarments)
     .catch(e => showError('err1', '衣装データ取得エラー: ' + e.message));
+
+  fetchDeliveryDays_();
 
   $('plan').addEventListener('change', () => {
     // プラン変更ですべての衣装の選択をリセット (通常↔撮影&イベントで日付意味が変わるため)
@@ -622,8 +661,7 @@ function onConfig(cfg) {
   $('genres').insertAdjacentHTML('afterbegin', '<option value="">選択してください</option>');
   $('genres').value = '';
   toggleShippingFields();
-  // 都道府県別お届け日数マップを取得 (郵送選択時のmin date計算用)
-  fetchDeliveryDays_();
+  /* fetchDeliveryDays_ は init() で並列起動済み (Config 待ちなし) */
   // 都道府県/受取方法 変更時に最短日警告
   $('prefecture').addEventListener('change', checkPrefectureDeliveryConstraint_);
   $('receiveMethod').addEventListener('change', checkPrefectureDeliveryConstraint_);
@@ -633,7 +671,7 @@ function onConfig(cfg) {
 // 都道府県別お届け日数マップを取得
 let DELIVERY_DAYS_MAP = {}; // prefecture name → days
 function fetchDeliveryDays_() {
-  apiCall('getDeliveryDays', {})
+  cachedApiCall_('getDeliveryDays', {})
     .then(res => {
       if (res && res.ok && res.days) {
         DELIVERY_DAYS_MAP = res.days;
@@ -813,7 +851,9 @@ function createGarmentCard(g) {
 
   const colors = (g.colors || []).join(' / ');
   const thumbClass = g.coverUrl ? '' : ' no-img';
-  const thumbStyle = g.coverUrl ? `background-image: url('${escapeHtml(g.coverUrl)}');` : '';
+  /* lazy loading: 画像URLはdata-src に置いて IntersectionObserver で画面入りした時のみセット */
+  const thumbStyle = '';
+  const thumbDataSrc = g.coverUrl ? `data-src="${escapeHtml(g.coverUrl)}"` : '';
 
   let dateLine = '';
   if (booking) {
@@ -837,7 +877,7 @@ function createGarmentCard(g) {
 
   card.innerHTML = `
     <div class="head">
-      <div class="thumb${thumbClass}" style="${thumbStyle}"></div>
+      <div class="thumb${thumbClass}" ${thumbDataSrc}></div>
       <div class="info">
         <div class="name">${escapeHtml(g.name)}</div>
         <div class="meta">${escapeHtml(g.series || '')}${colors ? ' ・ ' + escapeHtml(colors) : ''}</div>
@@ -848,6 +888,9 @@ function createGarmentCard(g) {
     <div class="body"></div>
   `;
   card.querySelector('.head').addEventListener('click', () => onGarmentCardClick(g, card));
+  /* lazy 画像読み込み登録 */
+  const thumbEl = card.querySelector('.thumb');
+  if (thumbEl && thumbEl.dataset.src) lazyImageObserver_.observe(thumbEl);
   // 既に開いてる衣装ならカレンダーを描画
   if (OPEN_GARMENT_ID === g.id) {
     loadGarmentCalendar(g, card.querySelector('.body'));
