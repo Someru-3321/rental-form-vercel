@@ -1555,8 +1555,28 @@ function onSubmitResult(res) {
     return;
   }
   fillSummaryCopy_(LAST_PAYLOAD);
-  sendLineSummaryIfPossible_(LAST_PAYLOAD);
+  /* LINE 表示順制御:
+     1. (サーバー push) テキスト通知 — submitMultiBooking 内で送信済
+     2. LIFF sendMessages — お客様自身からのサマリ (緑バブル)
+     3. (サーバー push) ご確認 flex bubble (はい/修正したい)
+     を順番に送ることで、ご確認 bubble が最後 (最新通知) に表示される */
+  sendLineSummaryThenConfirm_(LAST_PAYLOAD, res).catch(e => console.warn('post-submit msg flow:', e));
   setStep(3);
+}
+
+async function sendLineSummaryThenConfirm_(p, res) {
+  /* (2) LIFF sendMessages (緑バブル) */
+  try {
+    await sendLineSummaryIfPossible_(p);
+  } catch (e) { console.warn('liff.sendMessages failed:', e); }
+  /* (3) ご確認 Flex Bubble — サーバー push (LIFF 後に送ることで bubble が最新通知になる) */
+  const userId = (p && p.lineUserId) || '';
+  const pageId = (res && res.items && res.items[0] && res.items[0].pageId) || '';
+  if (userId && pageId) {
+    try {
+      await apiCall('sendConfirmBubble', { lineUserId: userId, pageId: pageId });
+    } catch (e) { console.warn('sendConfirmBubble failed:', e); }
+  }
 }
 
 function fillSummaryCopy_(p) {
@@ -1600,8 +1620,8 @@ function copySummary_() {
 }
 
 function sendLineSummaryIfPossible_(p) {
-  if (typeof liff === 'undefined' || !IS_IN_LINE || !liff.sendMessages) return;
-  if (!p || !p.items || !p.items.length) return;
+  if (typeof liff === 'undefined' || !IS_IN_LINE || !liff.sendMessages) return Promise.resolve();
+  if (!p || !p.items || !p.items.length) return Promise.resolve();
   const itemLines = p.items.map((it, i) => {
     const end = it.endDate ? fmtYmd_(it.endDate) : fmtEnd_(it.startDate, it.plan || p.plan);
     return `${i + 1}. ${it.garmentName}   ${fmtYmd_(it.startDate)} 〜 ${end}`;
@@ -1621,16 +1641,12 @@ function sendLineSummaryIfPossible_(p) {
     '決済: ' + (p.paymentMethod || '-'),
     '',
     '↑ レンタル空き確認フォームから送信しました。',
-    '',
-    '【ご確認のお願い 🙏】',
-    '上記の日程・内容で問題なければ「はい」と、',
-    '修正したい場合は「いいえ」とお返事ください。',
   ];
-  liff.sendMessages([
+  return liff.sendMessages([
     { type: 'text', text: summaryLines.join('\n') }
   ])
     .then(() => console.log('LINE summary sent'))
-    .catch(err => console.warn('liff.sendMessages failed:', err));
+    .catch(err => { console.warn('liff.sendMessages failed:', err); });
 }
 
 function validateBookingForm() {
