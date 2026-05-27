@@ -1447,7 +1447,13 @@ function toggleReceiptName_() {
   $('receiptNameWrap').classList.toggle('hidden', !checked);
 }
 
+let IS_SUBMITTING = false;
 function onSubmit() {
+  /* 二重送信ガード — タブ多重 / button戻る / fast double-click 防止 */
+  if (IS_SUBMITTING) {
+    console.warn('[onSubmit] already submitting, ignored');
+    return;
+  }
   hideError('err2');
   const validation = validateBookingForm();
   if (validation) { showError('err2', validation); return; }
@@ -1523,6 +1529,7 @@ function onSubmit() {
     lineDisplayName: LINE_DISPLAY_NAME,
   };
 
+  IS_SUBMITTING = true;
   $('btnSubmit').disabled = true;
   $('btnSubmit').innerHTML = '<span class="loading"></span>送信中...';
   LAST_PAYLOAD = payload;
@@ -1530,6 +1537,7 @@ function onSubmit() {
   apiCall('submitMultiBooking', payload)
     .then(onSubmitResult)
     .catch(e => {
+      IS_SUBMITTING = false;
       $('btnSubmit').disabled = false;
       $('btnSubmit').textContent = '予約を申し込む';
       showError('err2', '送信エラー: ' + e.message);
@@ -1537,6 +1545,7 @@ function onSubmit() {
 }
 
 function onSubmitResult(res) {
+  IS_SUBMITTING = false;
   $('btnSubmit').disabled = false;
   $('btnSubmit').textContent = '予約を申し込む';
   if (!res.ok) {
