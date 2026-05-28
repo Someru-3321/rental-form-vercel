@@ -482,8 +482,8 @@
         <input type="text" id="receiptName" placeholder="例: 株式会社○○ 様">
       </div>
 
-      <label class="req" for="paymentMethod">決済方法</label>
-      <select id="paymentMethod"></select>
+      <!-- 決済方法の選択は「同意書ご記入後」に移動 (step3でカード/振込をお選びいただく) -->
+      <input type="hidden" id="paymentMethod" value="">
 
       <div class="checkrow">
         <input type="checkbox" id="chkFood">
@@ -701,7 +701,7 @@ function onConfig(cfg) {
   fillSelect($('plan'), cfg.plans, cfg.defaultPlan);
   fillSelect($('genres'), cfg.genres);
   fillSelect($('receiveMethod'), cfg.receiveMethods);
-  fillSelect($('paymentMethod'), cfg.paymentMethods);
+  // 決済方法はstep3(同意書後)で選択するため、フォームでは選択不要
   fillSelect($('deliveryTime'), cfg.deliveryTimes, '時間指定なし');
   fillSelect($('prefecture'), cfg.prefectures, '東京都');
   $('genres').insertAdjacentHTML('afterbegin', '<option value="">選択してください</option>');
@@ -1605,7 +1605,7 @@ function fillSummaryCopy_(p) {
     '',
     '受取: ' + (p.receiveMethod || '-'),
     '時間: ' + (p.deliveryTime || '-'),
-    '決済: ' + (p.paymentMethod || '-'),
+    '決済: 同意書ご記入後にお選びいただけます',
     '',
     '↑ レンタル空き確認フォームから送信しました 🙏'
   ];
@@ -1647,7 +1647,7 @@ function sendLineSummaryIfPossible_(p) {
     '',
     '受取: ' + (p.receiveMethod || '-'),
     '時間: ' + (p.deliveryTime || '-'),
-    '決済: ' + (p.paymentMethod || '-'),
+    '決済: 同意書ご記入後にお選びいただけます',
     '',
     '↑ レンタル空き確認フォームから送信しました。',
   ];
@@ -1721,7 +1721,7 @@ function validateBookingForm() {
     if (!$('faceToFacePickupTime').value) return '対面受取時間 (受取) をお選びください';
     if (!$('faceToFaceReturnTime').value) return '対面受取時間 (返却) をお選びください';
   }
-  if (!$('paymentMethod').value) return '決済方法をお選びください';
+  // 決済方法はstep3(同意書ご記入後)に選択するため、ここでの必須チェックは不要
   // コンカフェ/コンセプトカフェ利用なら飲食利用必須
   const cafeKeywords = ['コンカフェ', 'コンセプトカフェ', 'こんかふぇ'];
   const fields = [$('useCase').value, $('activityName').value, $('group').value].join(' ').toLowerCase();
