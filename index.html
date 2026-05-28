@@ -657,23 +657,7 @@ function init() {
 
   fetchDeliveryDays_();
 
-  $('plan').addEventListener('change', () => {
-    // プラン変更ですべての衣装の選択をリセット (通常↔撮影&イベントで日付意味が変わるため)
-    BOOKINGS.forEach(b => {
-      b.calendar = null; b.startDate = null; b.endDate = null; b.viewMonth = null;
-      b.shootCalendar = null; b.shootDate = null; b.shootViewMonth = null;
-      b.eventCalendar = null; b.eventDate = null; b.eventViewMonth = null;
-    });
-    if (OPEN_GARMENT_ID) {
-      const b = BOOKINGS.find(x => x.garment.id === OPEN_GARMENT_ID);
-      if (b) {
-        const card = document.querySelector(`.garment-card[data-id="${OPEN_GARMENT_ID}"]`);
-        if (card) loadGarmentCalendar(b.garment, card.querySelector('.body'));
-      }
-    }
-    renderGarments();
-    renderBookingsSummary();
-  });
+  $('plan').addEventListener('change', () => applyPlanChange_($('plan').value));
   $('btnLineConsult').addEventListener('click', closeOrGoLine);
   $('btnLineDone').addEventListener('click', closeOrGoLine);
   $('btnCopySummary').addEventListener('click', copySummary_);
@@ -916,7 +900,7 @@ function createGarmentCard(g) {
         const days = diffDays_(booking.startDate, booking.endDate);
         dateLine = `<div class="selected-date">📅 ${fmtYmd_(booking.startDate)} 〜 ${fmtYmd_(booking.endDate)} (${days}泊${days+1}日)</div>`;
       } else {
-        dateLine = `<div class="selected-date">📅 開始: ${fmtYmd_(booking.startDate)} (ご返却日 未選択)</div>`;
+        dateLine = `<div class="selected-date">📅 開始: ${fmtYmd_(booking.startDate)} (期間に空きなし・要再選択)</div>`;
       }
     }
   }
@@ -1155,6 +1139,36 @@ function renderCalendarSection_(booking, sectionElem, kind) {
     const grid_parent = sectionElem.querySelector('[data-cal-grid]').parentNode;
     grid_parent.insertBefore(statusEl, grid_parent.firstChild);
   }
+  // プラン変更セレクタ (確認表記のすぐ下・通常プランのみ)
+  if (!kind) {
+    let planWrap = sectionElem.querySelector('.cal-plan-wrap');
+    if (!planWrap) {
+      planWrap = document.createElement('div');
+      planWrap.className = 'cal-plan-wrap';
+      planWrap.style.cssText = 'margin:2px 0 8px;';
+      const lbl = document.createElement('div');
+      lbl.style.cssText = 'font-size:11px;color:var(--ink-light);margin-bottom:3px;';
+      lbl.textContent = '📋 プラン (変更すると期間が変わります)';
+      const sel = document.createElement('select');
+      sel.className = 'cal-plan-select';
+      sel.style.cssText = 'width:100%;padding:8px;border:1px solid var(--pink-soft);border-radius:8px;font-size:13px;background:#fff;';
+      Array.from($('plan').options).forEach(o => {
+        const opt = document.createElement('option');
+        opt.value = o.value; opt.textContent = o.textContent;
+        sel.appendChild(opt);
+      });
+      sel.addEventListener('change', function (e) {
+        e.stopPropagation();
+        $('plan').value = this.value;
+        applyPlanChange_(this.value);
+      });
+      planWrap.appendChild(lbl);
+      planWrap.appendChild(sel);
+      statusEl.insertAdjacentElement('afterend', planWrap);
+    }
+    const _csel = planWrap.querySelector('.cal-plan-select');
+    if (_csel) _csel.value = $('plan').value;
+  }
   if (!kind) {
     if (lockedStart && !booking.startDate) {
       const lockedRange = lockedEnd ? `${fmtYmd_(lockedStart)} 〜 ${fmtYmd_(lockedEnd)}` : fmtYmd_(lockedStart);
@@ -1164,8 +1178,8 @@ function renderCalendarSection_(booking, sectionElem, kind) {
       statusEl.textContent = '📅 ご利用開始日をタップ';
       statusEl.style.background = '#fff5f8';
     } else if (!booking.endDate) {
-      statusEl.textContent = `📅 開始: ${fmtYmd_(booking.startDate)}  →  ご返却日 (=ご利用最終日) をタップ`;
-      statusEl.style.background = '#fff5f8';
+      statusEl.textContent = `⚠️ ${fmtYmd_(booking.startDate)} からのこのプラン期間は空きがありません。別の日かプランをお選びください`;
+      statusEl.style.background = '#fff0f0';
     } else {
       const days = diffDays_(booking.startDate, booking.endDate);
       statusEl.textContent = `✓ ${days}泊${days+1}日  ${fmtYmd_(booking.startDate)} 〜 ${fmtYmd_(booking.endDate)}`;
@@ -1200,41 +1214,18 @@ function selectDateForGarment(g, ymd, kind) {
   } else if (kind === 'event') {
     booking.eventDate = ymd;
   } else {
-    // 通常プラン: 2タップ式 (開始日 → 終了日)
-    if (!booking.startDate || (booking.startDate && booking.endDate)) {
-      // 1タップ目: 開始日設定 (もしくはリセット)
-      booking.startDate = ymd;
+    // 通常プラン: 1タップで開始日 → 選択中プランの泊数ぶん自動で終了日をマーク
+    const curPlan = $('plan').value;
+    const nights = planDaysFor_(curPlan, null); // 2/3/4/5/6泊
+    const endYmd = addDaysYmd_(ymd, nights);
+    booking.startDate = ymd;
+    if (isPeriodAllAvailable_(booking, ymd, endYmd)) {
+      booking.endDate = endYmd;
+      showCalendarMsg_(g.id, '');
+    } else {
+      // プランの期間内に予約済みの日が含まれる → 開始日のみ保持して案内
       booking.endDate = null;
-    } else if (booking.startDate && !booking.endDate) {
-      // 2タップ目: 終了日設定
-      if (ymd < booking.startDate) {
-        // 開始日より前 → リセットして新規開始日
-        booking.startDate = ymd;
-        booking.endDate = null;
-      } else if (ymd === booking.startDate) {
-        // 同日 → 何もしない (0泊不可)
-        showCalendarMsg_(g.id, '同じ日は選択できません');
-        return;
-      } else {
-        // 期間内すべて空いてるか確認
-        if (!isPeriodAllAvailable_(booking, booking.startDate, ymd)) {
-          showCalendarMsg_(g.id, '期間中に予約済みの日が含まれています');
-          return;
-        }
-        const days = diffDays_(booking.startDate, ymd);
-        const plan = getPlanForDays_(days);
-        if (!plan) {
-          showCalendarMsg_(g.id, days + '泊' + (days+1) + '日 は対応プランがありません (2〜4泊のみ)');
-          return;
-        }
-        booking.endDate = ymd;
-        // プラン自動切替
-        const planSelect = $('plan');
-        if (planSelect && planSelect.value !== plan) {
-          planSelect.value = plan;
-        }
-        showCalendarMsg_(g.id, '');
-      }
+      showCalendarMsg_(g.id, 'この開始日からの ' + nights + '泊' + (nights + 1) + '日 は予約済みの日を含みます。別の日かプランをお選びください');
     }
   }
 
@@ -1257,6 +1248,40 @@ function diffDays_(ymd1, ymd2) {
   const d1 = new Date(ymd1 + 'T00:00:00');
   const d2 = new Date(ymd2 + 'T00:00:00');
   return Math.round((d2 - d1) / 86400000);
+}
+
+function addDaysYmd_(ymd, n) {
+  const d = new Date(ymd + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return formatDateLocal(d);
+}
+
+/* プラン変更の共通処理: 通常↔通常は開始日を保持して期間を再計算、種別が変わる時のみ日付リセット */
+function applyPlanChange_(newPlan) {
+  const nowSet = isShootEventPlan_(newPlan);
+  BOOKINGS.forEach(b => {
+    // プラン変更でカレンダーキャッシュは無効化 (空き判定がプラン日数で変わるため)
+    b.calendar = null; b.viewMonth = null;
+    b.shootCalendar = null; b.shootViewMonth = null;
+    b.eventCalendar = null; b.eventViewMonth = null;
+    const hadNormal = !!b.startDate;
+    const hadSet = !!(b.shootDate || b.eventDate);
+    if (nowSet && hadNormal) { b.startDate = null; b.endDate = null; }      // 通常→撮影&イベント
+    if (!nowSet && hadSet) { b.shootDate = null; b.eventDate = null; }      // 撮影&イベント→通常
+    if (!nowSet && b.startDate) {
+      // 通常↔通常: 開始日を保持して終了日を再計算 (空き確認は再描画/送信時)
+      b.endDate = addDaysYmd_(b.startDate, planDaysFor_(newPlan, null));
+    }
+  });
+  if (OPEN_GARMENT_ID) {
+    const b = BOOKINGS.find(x => x.garment.id === OPEN_GARMENT_ID);
+    if (b) {
+      const card = document.querySelector(`.garment-card[data-id="${OPEN_GARMENT_ID}"]`);
+      if (card) loadGarmentCalendar(b.garment, card.querySelector('.body'));
+    }
+  }
+  renderGarments();
+  renderBookingsSummary();
 }
 
 function getPlanForDays_(days) {
@@ -1322,6 +1347,8 @@ function planDaysFor_(plan, kind) {
     '通常プラン【2泊3日】': 2,
     '通常プラン【3泊4日】': 3,
     '通常プラン【4泊5日】': 4,
+    '通常プラン【5泊6日】': 5,
+    '通常プラン【6泊7日】': 6,
   };
   for (const key in baseMap) {
     if (plan && plan.indexOf(key) === 0) return baseMap[key];
