@@ -777,6 +777,23 @@
     }
   }
 
+  /* 決済オプションを常に表示する (カード + 銀行振込)。
+     カードリンクが未発行でも振込先は必ず出すので、お客様が「詰まる(戻れない)」状態にならない。 */
+  function renderPaymentOptions_(amount, cardUrl, bankInfo, bankDueLabel) {
+    const due = bankDueLabel || '同意書送信日から営業日3日以内';
+    if (cardUrl) {
+      $('payBtn').style.display = '';
+      $('payBtn').href = cardUrl;
+      $('payBtn').textContent = 'クレジットカードでお支払い';
+      $('payHint').textContent = 'クレジットカード、またはお振込でお支払いいただけます';
+    } else {
+      $('payBtn').style.display = 'none';
+      $('payHint').textContent = 'お振込にてお支払いください（カードをご希望の場合はLINEでお知らせください）';
+    }
+    /* 銀行振込カードは常時表示。カードは上の主ボタンで出すので altPay は使わない (空文字を渡す) */
+    renderBankCard_(bankInfo || null, amount, due, '');
+  }
+
   async function loadBooking() {
     PAGE_ID = getQuery('pid');
     if (!PAGE_ID) {
@@ -803,17 +820,8 @@
           wrapper.innerHTML = renderBreakdown_(b.breakdown, b.amount);
           $('payAmount').insertAdjacentElement('afterend', wrapper);
         }
-        const isBankExisting = (b.paymentMethod === 'お振込');
-        const existingPay = b.existingPaymentUrl || '';
-        if (isBankExisting) {
-          $('payBtn').style.display = 'none';
-          $('payHint').textContent = 'お振込にてお支払いください';
-          renderBankCard_(null, b.amount, '同意書送信日から営業日3日以内', existingPay);
-        } else if (existingPay) {
-          $('payBtn').href = existingPay;
-        } else {
-          $('payBtn').style.display = 'none';
-        }
+        /* 既にご署名済み: カード・振込の両方を常に表示 (詰まり防止) */
+        renderPaymentOptions_(b.amount, b.existingPaymentUrl || '', b.bankInfo || null, '同意書送信日から営業日3日以内');
         return;
       }
 
@@ -977,16 +985,8 @@
         wrapper.innerHTML = bdHtml;
         $amt.insertAdjacentElement('afterend', wrapper);
       }
-      /* 決済方法による分岐: 銀行振込 (bank) / Stripe (stripe) */
-      if (res.paymentMode === 'bank' && res.bankInfo) {
-        $('payBtn').style.display = 'none';
-        $('payHint').textContent = 'お振込にてお支払いください';
-        renderBankCard_(res.bankInfo, res.amount, res.bankDueLabel, res.paymentUrl);
-      } else if (res.paymentUrl) {
-        $('payBtn').href = res.paymentUrl;
-      } else {
-        $('payBtn').style.display = 'none';
-      }
+      /* カード・振込の両方を常に表示。カードリンク未発行でも振込先は必ず出す → 詰まり(戻れない)防止 */
+      renderPaymentOptions_(res.amount, res.paymentUrl, res.bankInfo, res.bankDueLabel);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
       showErr('送信エラー: ' + e.message);
