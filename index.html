@@ -1017,7 +1017,9 @@ function loadCalendarSection_(booking, sectionElem, kind, planDaysOverride) {
       else if (kind === 'event') booking.eventCalendar = d;
       else booking.calendar = d;
       const firstAvail = d.dayStatus.find(s => s.available);
-      const init = firstAvail ? new Date(firstAvail.date + 'T00:00:00') : new Date();
+      // 既に日付を選択済みなら、その月を表示 (タップ後に選択範囲が見えるように)
+      const selDate = (kind === 'shoot') ? booking.shootDate : (kind === 'event') ? booking.eventDate : booking.startDate;
+      const init = selDate ? new Date(selDate + 'T00:00:00') : (firstAvail ? new Date(firstAvail.date + 'T00:00:00') : new Date());
       const vm = new Date(init.getFullYear(), init.getMonth(), 1);
       if (kind === 'shoot') booking.shootViewMonth = vm;
       else if (kind === 'event') booking.eventViewMonth = vm;
