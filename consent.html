@@ -650,6 +650,8 @@
       <p style="margin-top: 24px; font-size: 12px;">
         ご不明点はリッチメニュー<br>「お問い合わせ」よりお気軽にどうぞ
       </p>
+
+      <button type="button" id="btnBackLine" style="margin-top: 20px; width: 100%; padding: 14px; border: none; border-radius: 10px; background: #06c755; color: #fff; font-size: 15px; font-weight: 700; cursor: pointer;">LINEのトークに戻る</button>
     </div>
   </div>
 
@@ -994,6 +996,23 @@
       btn.textContent = '同意して送信する';
     }
   });
+
+  // ===== LINEのトークに戻る =====
+  (function () {
+    const b = document.getElementById('btnBackLine');
+    if (!b) return;
+    b.addEventListener('click', function () {
+      // LINEアプリ内(LIFF)ならウィンドウを閉じてトークに戻る
+      try {
+        if (window.liff && typeof liff.closeWindow === 'function' && liff.isInClient && liff.isInClient()) {
+          liff.closeWindow();
+          return;
+        }
+      } catch (e) {}
+      // 通常ブラウザのフォールバック: LINEを開く
+      location.href = 'https://line.me/R/';
+    });
+  })();
 
   // ===== Init =====
   (async () => {
