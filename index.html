@@ -613,7 +613,7 @@ let LINE_USER_ID = '';        // LIFF経由で取得
 let LINE_DISPLAY_NAME = '';   // 同上
 let IS_IN_LINE = false;       // LINE内ブラウザで開かれているか
 let LAST_PAYLOAD = null;      // 送信成功時 liff.sendMessages 用
-const MAX_FUTURE_DAYS = 60;
+const MAX_FUTURE_DAYS = 120;  // 予約可能期間: 約4ヶ月先まで (旧60日=約2ヶ月)
 // ご利用開始日の最短: 今日+2日 (明後日以降)。
 // 郵送 + 遠方の場合は更に都道府県別お届け日数を加算 (動的に SHIPPING_EXTRA_DAYS に設定)
 const MIN_BOOK_OFFSET_DAYS_BASE = 2;
